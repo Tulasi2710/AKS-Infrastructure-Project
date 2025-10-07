@@ -24,4 +24,4 @@ tags = {
   Environment = "Development"
   Project     = "AKS-Infrastructure"
   ManagedBy   = "Terraform"
-}
+}# Trigger workflow
