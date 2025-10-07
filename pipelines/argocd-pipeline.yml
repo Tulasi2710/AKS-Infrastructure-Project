@@ -1,5 +1,5 @@
-# Azure DevOps Pipeline for ArgoCD GitOps Setup
-# This pipeline installs and configures ArgoCD for GitOps deployments
+# Azure DevOps Pipeline for Kubernetes Deployment with ArgoCD
+# This pipeline handles GitOps deployments using ArgoCD
 
 trigger:
   branches:
@@ -8,6 +8,7 @@ trigger:
     - develop
   paths:
     include:
+    - k8s/**
     - argocd/**
     - scripts/install-argocd.*
     - pipelines/argocd-pipeline.yml
@@ -18,6 +19,7 @@ pr:
     - main
   paths:
     include:
+    - k8s/**
     - argocd/**
     - scripts/install-argocd.*
     - pipelines/argocd-pipeline.yml

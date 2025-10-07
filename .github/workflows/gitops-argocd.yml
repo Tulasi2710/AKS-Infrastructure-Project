@@ -1,15 +1,17 @@
-name: 'GitOps with ArgoCD Setup'
+name: 'Kubernetes Deployment with ArgoCD'
 
 on:
   push:
     branches: [ "main" ]
     paths:
+      - 'k8s/**'
       - 'argocd/**'
       - 'scripts/install-argocd.*'
       - '.github/workflows/gitops-argocd.yml'
   pull_request:
     branches: [ "main" ]
     paths:
+      - 'k8s/**'
       - 'argocd/**'
       - 'scripts/install-argocd.*'
       - '.github/workflows/gitops-argocd.yml'
@@ -28,12 +30,14 @@ on:
       action:
         description: 'Action to perform'
         required: false
-        default: 'install'
+        default: 'install-and-sync'
         type: choice
         options:
-        - install
-        - uninstall
+        - install-and-sync
+        - install-only
+        - sync-only
         - status
+        - uninstall
 
 permissions:
   id-token: write
@@ -43,8 +47,8 @@ env:
   KUBECTL_VERSION: 'v1.28.0'
 
 jobs:
-  validate-argocd:
-    name: 'Validate ArgoCD Manifests'
+  validate-manifests:
+    name: 'Validate Kubernetes & ArgoCD Manifests'
     runs-on: ubuntu-latest
     
     steps:
@@ -56,31 +60,50 @@ jobs:
       with:
         version: ${{ env.KUBECTL_VERSION }}
 
-    - name: Validate ArgoCD YAML
+    - name: Validate Kubernetes Manifests
+      run: |
+        echo "🔍 Validating Kubernetes application manifests..."
+        if [ -d "k8s" ]; then
+          find k8s/ -name "*.yaml" -o -name "*.yml" | while read file; do
+            echo "  ✓ Validating $file"
+            kubectl apply --dry-run=client -f "$file" || exit 1
+          done
+          echo "✅ All Kubernetes manifests are valid"
+        else
+          echo "⚠️  No k8s directory found - skipping K8s validation"
+        fi
+
+    - name: Validate ArgoCD Manifests
       run: |
         echo "🔍 Validating ArgoCD manifests..."
-        find argocd/ -name "*.yaml" -o -name "*.yml" | while read file; do
-          echo "  ✓ Validating $file"
-          kubectl apply --dry-run=client -f "$file" || exit 1
-        done
-        echo "✅ All ArgoCD manifests are valid"
+        if [ -d "argocd" ]; then
+          find argocd/ -name "*.yaml" -o -name "*.yml" | while read file; do
+            echo "  ✓ Validating $file"
+            kubectl apply --dry-run=client -f "$file" || exit 1
+          done
+          echo "✅ All ArgoCD manifests are valid"
+        else
+          echo "⚠️  No argocd directory found - skipping ArgoCD validation"
+        fi
 
-    - name: Check Application References
+    - name: Check GitOps Configuration
       run: |
-        echo "📋 Checking ArgoCD application configurations..."
-        echo "Repository URL in applications:"
-        grep -r "repoURL:" argocd/ || echo "No repoURL found"
-        echo ""
-        echo "Target namespaces:"
-        grep -r "namespace:" argocd/ || echo "No namespaces found"
-        echo ""
-        echo "Source paths:"
-        grep -r "path:" argocd/ || echo "No paths found"
+        echo "📋 Checking GitOps configuration..."
+        if [ -f "argocd/applications.yaml" ]; then
+          echo "Repository URLs in applications:"
+          grep -r "repoURL:" argocd/ || echo "No repoURL found"
+          echo ""
+          echo "Application source paths:"
+          grep -r "path:" argocd/ | grep -v "filepath" || echo "No paths found"
+          echo ""
+          echo "Target namespaces:"
+          grep -r "namespace:" argocd/ || echo "No namespaces found"
+        fi
 
-  setup-argocd:
-    name: 'Setup ArgoCD on AKS'
+  gitops-deployment:
+    name: 'GitOps Deployment with ArgoCD'
     runs-on: ubuntu-latest
-    needs: validate-argocd
+    needs: validate-manifests
     if: github.ref == 'refs/heads/main'
     environment: argocd-deployment
     
@@ -235,3 +258,128 @@ jobs:
         echo "   4. Monitor synchronization in ArgoCD dashboard"
         echo ""
         echo "🚀 Your GitOps workflow is ready!"
+
+  sync-applications:
+    name: 'Sync GitOps Applications'
+    runs-on: ubuntu-latest
+    needs: gitops-deployment
+    if: github.ref == 'refs/heads/main' && (contains(github.event.head_commit.modified, 'k8s/') || github.event_name == 'workflow_dispatch')
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: ${{ env.KUBECTL_VERSION }}
+
+    - name: Connect to AKS Cluster
+      run: |
+        CLUSTER_NAME="${{ github.event.inputs.aks_cluster_name || 'aks-cluster-dev' }}"
+        RG_NAME="${{ github.event.inputs.resource_group_name || 'rg-aks-dev' }}"
+        
+        echo "🔗 Connecting to AKS cluster: $CLUSTER_NAME in resource group: $RG_NAME"
+        az aks get-credentials --resource-group "$RG_NAME" --name "$CLUSTER_NAME" --overwrite-existing
+        kubectl cluster-info
+
+    - name: Trigger ArgoCD Sync
+      run: |
+        echo "🔄 Triggering ArgoCD application sync..."
+        
+        # Check ArgoCD is installed
+        if ! kubectl get namespace argocd 2>/dev/null; then
+          echo "❌ ArgoCD is not installed. Run the ArgoCD installation first."
+          exit 1
+        fi
+        
+        # Get list of applications
+        APPLICATIONS=$(kubectl get applications -n argocd -o name 2>/dev/null | sed 's/application.argoproj.io\///')
+        
+        if [ -z "$APPLICATIONS" ]; then
+          echo "⚠️ No ArgoCD applications found"
+          exit 0
+        fi
+        
+        echo "Applications found: $APPLICATIONS"
+        
+        # Trigger sync for each application
+        for app in $APPLICATIONS; do
+          echo "Syncing application: $app"
+          kubectl patch application "$app" -n argocd -p '{"operation":{"initiatedBy":{"username":"github-actions"},"sync":{"revision":"HEAD"}}}' --type merge || true
+        done
+
+    - name: Monitor Sync Status
+      run: |
+        echo "👀 Monitoring ArgoCD sync status..."
+        
+        # Wait for sync to complete
+        timeout=300
+        while [ $timeout -gt 0 ]; do
+          echo ""
+          echo "Application Status ($(date)):"
+          kubectl get applications -n argocd -o custom-columns="NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,REVISION:.status.sync.revision" 2>/dev/null || true
+          
+          # Check if any application is still syncing
+          SYNCING=$(kubectl get applications -n argocd -o jsonpath='{.items[*].status.sync.status}' 2>/dev/null | grep -c "Syncing" || echo "0")
+          
+          if [ "$SYNCING" -eq 0 ]; then
+            echo ""
+            echo "✅ All applications have completed synchronization"
+            break
+          fi
+          
+          echo "  ⏳ Waiting for sync completion... ($timeout seconds remaining)"
+          sleep 10
+          timeout=$((timeout-10))
+        done
+        
+        if [ $timeout -le 0 ]; then
+          echo "⚠️ Sync monitoring timed out after 5 minutes"
+        fi
+
+    - name: Final GitOps Status Report
+      run: |
+        echo ""
+        echo "📊 GitOps Status Report:"
+        echo "======================="
+        
+        # Application status
+        echo ""
+        echo "Application Health:"
+        kubectl get applications -n argocd -o wide 2>/dev/null || echo "No applications found"
+        
+        # Get detailed status for each app
+        APPLICATIONS=$(kubectl get applications -n argocd -o name 2>/dev/null | sed 's/application.argoproj.io\///')
+        
+        for app in $APPLICATIONS; do
+          echo ""
+          echo "Application: $app"
+          SYNC_STATUS=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+          HEALTH_STATUS=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+          REVISION=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.sync.revision}' 2>/dev/null || echo "Unknown")
+          
+          echo "  Sync Status: $SYNC_STATUS"
+          echo "  Health Status: $HEALTH_STATUS"
+          echo "  Git Revision: $REVISION"
+        done
+        
+        # ArgoCD UI access
+        echo ""
+        echo "🔗 ArgoCD UI Access:"
+        ARGOCD_IP=$(kubectl get svc argocd-server-loadbalancer -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "Pending")
+        if [ "$ARGOCD_IP" != "Pending" ]; then
+          echo "   https://$ARGOCD_IP"
+        else
+          echo "   LoadBalancer IP pending - check: kubectl get svc argocd-server-loadbalancer -n argocd"
+        fi
+        
+        echo ""
+        echo "🎉 GitOps sync completed!"
