@@ -1,5 +1,9 @@
 name: 'Kubernetes Deployment with ArgoCD'
 
+# PREREQUISITES: 
+# This workflow requires an existing AKS cluster created by the Terraform pipeline.
+# Run the infrastructure pipeline (terraform.yml) first to create the AKS cluster.
+
 on:
   push:
     branches: [ "main" ]
@@ -193,17 +197,76 @@ jobs:
       with:
         version: ${{ env.KUBECTL_VERSION }}
 
-    - name: Connect to AKS Cluster
+    - name: Discover and Connect to AKS Cluster
       run: |
-        CLUSTER_NAME="${{ github.event.inputs.aks_cluster_name || 'aks-cluster-dev' }}"
-        RG_NAME="${{ github.event.inputs.resource_group_name || 'rg-aks-dev' }}"
+        echo "🔍 Discovering AKS clusters in subscription..."
         
-        echo "🔗 Connecting to AKS cluster: $CLUSTER_NAME in resource group: $RG_NAME"
+        # Try user-provided names first
+        CLUSTER_NAME="${{ github.event.inputs.aks_cluster_name }}"
+        RG_NAME="${{ github.event.inputs.resource_group_name }}"
+        
+        # If not provided, search for AKS clusters created by Terraform
+        if [ -z "$CLUSTER_NAME" ] || [ -z "$RG_NAME" ]; then
+          echo "📋 Searching for AKS clusters created by Terraform..."
+          
+          # List all AKS clusters and find the one created by Terraform
+          AKS_CLUSTERS=$(az aks list --query "[?tags.Project=='aks-infra' && tags.Environment=='dev'].{name:name,resourceGroup:resourceGroup}" -o tsv 2>/dev/null || echo "")
+          
+          if [ -n "$AKS_CLUSTERS" ]; then
+            # Get the first matching cluster
+            CLUSTER_INFO=$(echo "$AKS_CLUSTERS" | head -n 1)
+            CLUSTER_NAME=$(echo "$CLUSTER_INFO" | cut -f1)
+            RG_NAME=$(echo "$CLUSTER_INFO" | cut -f2)
+            
+            echo "✅ Found Terraform-managed AKS cluster: $CLUSTER_NAME in $RG_NAME"
+          else
+            # Fallback to default names
+            CLUSTER_NAME="aks-cluster-dev"
+            RG_NAME="rg-aks-dev"
+            echo "⚠️  No Terraform-managed clusters found, trying default names..."
+          fi
+        fi
+        
+        echo "🔗 Attempting to connect to AKS cluster: $CLUSTER_NAME in resource group: $RG_NAME"
+        
+        # Check if resource group exists
+        if ! az group show --name "$RG_NAME" > /dev/null 2>&1; then
+          echo "❌ Resource group '$RG_NAME' not found!"
+          echo ""
+          echo "💡 Available resource groups:"
+          az group list --query "[].name" -o table
+          echo ""
+          echo "� Please ensure the infrastructure is deployed first using the Terraform pipeline."
+          echo "   Or provide the correct cluster name and resource group name as workflow inputs."
+          exit 1
+        fi
+        
+        # Check if AKS cluster exists
+        if ! az aks show --name "$CLUSTER_NAME" --resource-group "$RG_NAME" > /dev/null 2>&1; then
+          echo "❌ AKS cluster '$CLUSTER_NAME' not found in resource group '$RG_NAME'!"
+          echo ""
+          echo "💡 Available AKS clusters in resource group:"
+          az aks list --resource-group "$RG_NAME" --query "[].name" -o table 2>/dev/null || echo "No AKS clusters found"
+          echo ""
+          echo "🚨 Please ensure the infrastructure is deployed first using the Terraform pipeline."
+          exit 1
+        fi
+        
+        # Connect to the cluster
+        echo "🔗 Connecting to AKS cluster..."
         az aks get-credentials --resource-group "$RG_NAME" --name "$CLUSTER_NAME" --overwrite-existing
         
-        echo "✅ Connected to cluster"
+        echo "✅ Connected to cluster successfully!"
+        echo ""
+        echo "📊 Cluster Information:"
         kubectl cluster-info
+        echo ""
+        echo "📋 Node Status:"
         kubectl get nodes
+        
+        # Export cluster details for subsequent jobs
+        echo "DISCOVERED_CLUSTER_NAME=$CLUSTER_NAME" >> $GITHUB_ENV
+        echo "DISCOVERED_RG_NAME=$RG_NAME" >> $GITHUB_ENV
 
     - name: Check Current ArgoCD Status
       continue-on-error: true
@@ -353,8 +416,24 @@ jobs:
 
     - name: Connect to AKS Cluster
       run: |
-        CLUSTER_NAME="${{ github.event.inputs.aks_cluster_name || 'aks-cluster-dev' }}"
-        RG_NAME="${{ github.event.inputs.resource_group_name || 'rg-aks-dev' }}"
+        # Try user-provided names first, then discover
+        CLUSTER_NAME="${{ github.event.inputs.aks_cluster_name }}"
+        RG_NAME="${{ github.event.inputs.resource_group_name }}"
+        
+        if [ -z "$CLUSTER_NAME" ] || [ -z "$RG_NAME" ]; then
+          echo "🔍 Discovering AKS cluster..."
+          AKS_CLUSTERS=$(az aks list --query "[?tags.Project=='aks-infra' && tags.Environment=='dev'].{name:name,resourceGroup:resourceGroup}" -o tsv 2>/dev/null || echo "")
+          
+          if [ -n "$AKS_CLUSTERS" ]; then
+            CLUSTER_INFO=$(echo "$AKS_CLUSTERS" | head -n 1)
+            CLUSTER_NAME=$(echo "$CLUSTER_INFO" | cut -f1)
+            RG_NAME=$(echo "$CLUSTER_INFO" | cut -f2)
+            echo "✅ Found cluster: $CLUSTER_NAME in $RG_NAME"
+          else
+            echo "❌ No AKS clusters found. Please ensure infrastructure is deployed first."
+            exit 1
+          fi
+        fi
         
         echo "🔗 Connecting to AKS cluster: $CLUSTER_NAME in resource group: $RG_NAME"
         az aks get-credentials --resource-group "$RG_NAME" --name "$CLUSTER_NAME" --overwrite-existing
