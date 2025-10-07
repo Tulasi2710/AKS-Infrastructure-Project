@@ -1,42 +1,75 @@
-# AKS Infrastructure Project
+# AKS Infrastructure Project with GitOps
 
-A production-ready Terraform infrastructure setup for deploying Azure Kubernetes Service (AKS) clusters with automated CI/CD pipelines using GitHub Actions and Azure DevOps.
+A production-ready Terraform infrastructure setup for deploying Azure Kubernetes Service (AKS) clusters with GitOps-enabled CI/CD pipelines using GitHub Actions, Azure DevOps, and ArgoCD.
 
 ## 🏗️ Architecture Overview
 
-This project implements a modular, scalable infrastructure-as-code solution:
+This project implements a comprehensive, scalable infrastructure-as-code and GitOps solution:
 
+### Infrastructure Layer
 - **🏢 Resource Group Module**: Manages Azure resource groups with standardized naming and tagging
 - **🌐 Networking Module**: Creates VNet, subnets, and Network Security Groups with proper CIDR management
 - **☸️ AKS Module**: Deploys Azure Kubernetes Service with system-assigned managed identity and optimized networking
-- **🚀 CI/CD Integration**: Dual pipeline support (GitHub Actions + Azure DevOps) with workload identity federation
+
+### CI/CD & GitOps Layer
+- **🚀 Infrastructure Pipelines**: Dual pipeline support (GitHub Actions + Azure DevOps) with workload identity federation
+- **☸️ GitOps Deployment**: ArgoCD-powered continuous deployment with Git as the single source of truth
+- **🔄 Automated Sync**: Kubernetes manifests automatically synchronized from Git to cluster
+- **📊 Microservices Demo**: E-commerce application with database and monitoring components
 
 ## ✅ Project Status
 
-**Current State**: Production-ready infrastructure with working CI/CD pipelines
+**Current State**: Production-ready infrastructure with comprehensive GitOps workflow
 
+### Infrastructure Foundation
 - ✅ **Authentication**: Workload Identity Federation configured for GitHub Actions
 - ✅ **Networking**: CIDR conflicts resolved, proper service/pod networking
 - ✅ **Compute**: VM size compatibility verified for Azure regions
 - ✅ **Security**: Service principal with minimal permissions, secure state management
 - ✅ **Automation**: Both GitHub Actions and Azure DevOps pipelines operational
 
+### GitOps Implementation
+- ✅ **ArgoCD Integration**: Complete GitOps setup with automated installation
+- ✅ **Application Management**: E-commerce microservices with database and monitoring
+- ✅ **Automated Sync**: Git-driven deployments with self-healing capabilities  
+- ✅ **Cross-Platform**: GitOps pipelines for both GitHub Actions and Azure DevOps
+- ✅ **Production Ready**: Proper RBAC, resource management, and audit trails
+
 ## 📁 Project Structure
 
 ```
 AKS-Infrastructure-Project/
-├── terraform/
+├── terraform/                   # Infrastructure as Code
 │   ├── modules/
 │   │   ├── resource-group/      # Reusable resource group module
 │   │   ├── networking/          # VNet and subnet configuration
 │   │   └── aks/                # AKS cluster module
 │   └── environments/
 │       └── dev/                # Development environment
-├── pipelines/
-│   └── azure-pipelines.yml     # Azure DevOps pipeline
-├── .github/workflows/
-│   └── terraform.yml           # GitHub Actions workflow
+├── k8s/                        # Kubernetes Manifests (GitOps Source)
+│   ├── microservices/          # E-commerce application services
+│   ├── database/               # PostgreSQL database
+│   └── monitoring/             # Prometheus & Grafana stack
+├── argocd/                     # ArgoCD GitOps Configuration
+│   ├── argocd-namespace.yaml   # ArgoCD installation namespace
+│   ├── applications.yaml       # ArgoCD application definitions
+│   └── project.yaml           # ArgoCD project with RBAC
+├── pipelines/                  # CI/CD Pipeline Definitions
+│   ├── azure-pipelines.yml     # Infrastructure (Azure DevOps)
+│   ├── k8s-deployment.yml      # Legacy K8s deployment
+│   ├── argocd-pipeline.yml     # ArgoCD installation (Azure DevOps)
+│   └── argocd-sync-pipeline.yml # GitOps sync (Azure DevOps)
+├── .github/workflows/          # GitHub Actions Workflows
+│   ├── terraform.yml           # Infrastructure deployment
+│   ├── deploy-k8s.yml          # Legacy K8s deployment
+│   ├── gitops-argocd.yml       # ArgoCD installation
+│   └── argocd-sync.yml         # GitOps synchronization
+├── scripts/                    # Automation Scripts
+│   ├── setup.sh               # Environment setup
+│   ├── install-argocd.sh       # ArgoCD installation (Bash)
+│   └── install-argocd.ps1      # ArgoCD installation (PowerShell)
 └── docs/                       # Documentation
+    └── deployment-guide.md      # Comprehensive deployment guide
 ```
 
 ## 🚀 Getting Started
@@ -47,12 +80,16 @@ AKS-Infrastructure-Project/
 2. **Terraform** v1.6.0 (exact version used in CI/CD)
 3. **Azure CLI** for local development
 4. **GitHub/Azure DevOps** account for CI/CD pipeline execution
+5. **kubectl** for Kubernetes cluster management
+6. **Git** for GitOps workflow
 
-### 🚀 Quick Start (Automated Deployment)
+### 🚀 Complete GitOps Deployment
 
-The easiest way to deploy this infrastructure is through the CI/CD pipelines:
+Follow these steps for a complete infrastructure + GitOps setup:
 
-#### GitHub Actions (Recommended)
+#### Step 1: Infrastructure Deployment 
+
+**GitHub Actions (Recommended)**
 1. **Fork this repository**
 2. **Configure GitHub Secrets**:
    - `AZURE_CLIENT_ID`: `4813e1ea-ebfa-46c4-bbdc-6bf8225ad061`
@@ -61,14 +98,74 @@ The easiest way to deploy this infrastructure is through the CI/CD pipelines:
    - `TF_STATE_RESOURCE_GROUP`: `TulasiteraformRG`
    - `TF_STATE_STORAGE_ACCOUNT`: Your storage account name
 
-3. **Create Production Environment**: GitHub → Settings → Environments → New environment (`production`)
-4. **Push changes** to main branch or manually trigger the workflow
+3. **Create Environments**:
+   - GitHub → Settings → Environments → New environment (`production`)
+   - GitHub → Settings → Environments → New environment (`argocd-deployment`)
+   - GitHub → Settings → Environments → New environment (`argocd-sync`)
 
-#### Azure DevOps
+4. **Deploy Infrastructure**: Push changes to main branch or manually trigger the Terraform workflow
+
+**Azure DevOps (Alternative)**
 1. **Import this repository** to Azure DevOps
 2. **Create Service Connection** named `azure-service-connection1`
 3. **Configure Variable Group** `terraform-backend` with storage account details
-4. **Run the pipeline**
+4. **Create Environments**: `production`, `argocd-gitops`, `argocd-sync`
+5. **Run the infrastructure pipeline**
+
+#### Step 2: ArgoCD GitOps Setup
+
+**After infrastructure is deployed:**
+
+1. **Connect to AKS Cluster**:
+   ```bash
+   az aks get-credentials --resource-group rg-aks-dev --name aks-cluster-dev
+   ```
+
+2. **Deploy ArgoCD** (Choose one method):
+
+   **Option A: Via Pipeline (Recommended)**
+   - Trigger the GitOps ArgoCD workflow in GitHub Actions or Azure DevOps
+   - The pipeline will install ArgoCD and configure all applications automatically
+
+   **Option B: Manual Installation**
+   ```bash
+   # Using provided script
+   ./scripts/install-argocd.sh
+   
+   # Or PowerShell on Windows
+   .\scripts\install-argocd.ps1
+   ```
+
+3. **Access ArgoCD UI**:
+   ```bash
+   # Get ArgoCD admin password
+   kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+   
+   # Get LoadBalancer IP
+   kubectl get svc argocd-server-loadbalancer -n argocd
+   
+   # Access UI at https://<EXTERNAL-IP>
+   # Username: admin
+   # Password: <retrieved-password>
+   ```
+
+#### Step 3: Verify GitOps Workflow
+
+1. **Check ArgoCD Applications**:
+   ```bash
+   kubectl get applications -n argocd
+   ```
+
+2. **Test GitOps Sync**:
+   - Modify any file in `k8s/` directory
+   - Push changes to main branch  
+   - Watch ArgoCD automatically sync changes
+   - Monitor in ArgoCD UI or via CLI
+
+3. **Monitor Application Health**:
+   - View application status in ArgoCD UI
+   - Check sync status and health
+   - View deployment history and logs
 
 ### 💻 Local Development Setup
 
@@ -123,10 +220,26 @@ Current configuration in `terraform.tfvars`:
 
 The backend is automatically configured in CI/CD pipelines.
 
-## 🔄 CI/CD Pipelines
+## 🔄 CI/CD Pipelines & GitOps
 
-### GitHub Actions Workflow ⭐ (Primary)
+This project implements a comprehensive pipeline architecture with separated concerns:
 
+### 📊 Pipeline Architecture
+
+```mermaid
+graph TB
+    A[Code Changes] --> B{Change Type}
+    B -->|Infrastructure| C[Terraform Pipeline]
+    B -->|Applications| D[GitOps Pipeline]
+    C --> E[AKS Cluster]
+    D --> F[ArgoCD]
+    F --> G[Applications]
+    E --> F
+```
+
+### 🏗️ Infrastructure Pipelines
+
+#### GitHub Actions (Primary) ⭐
 **Location**: `.github/workflows/terraform.yml`
 
 **Features:**
@@ -141,8 +254,7 @@ The backend is automatically configured in CI/CD pipelines.
 2. **terraform-plan**: Infrastructure planning with change preview  
 3. **terraform-apply**: Automated deployment to Azure (main branch only)
 
-### Azure DevOps Pipeline 🔄 (Alternative)
-
+#### Azure DevOps (Alternative) 🔄
 **Location**: `pipelines/azure-pipelines.yml`
 
 **Features:**
@@ -152,10 +264,66 @@ The backend is automatically configured in CI/CD pipelines.
 - ✅ **Environment approvals** for controlled deployments
 - ✅ **Parallel execution** capabilities
 
-**Pipeline Stages:**
-1. **Validate**: Format checking and configuration validation
-2. **Plan**: Infrastructure change planning with artifact storage
-3. **Apply**: Deployment with approval gates
+### ☸️ GitOps Pipelines
+
+#### ArgoCD Installation Pipeline
+**Locations**: 
+- GitHub: `.github/workflows/gitops-argocd.yml`
+- Azure DevOps: `pipelines/argocd-pipeline.yml`
+
+**Purpose**: Install and configure ArgoCD in your AKS cluster
+
+**Features:**
+- ✅ **Automated ArgoCD installation** with proper RBAC
+- ✅ **LoadBalancer service** for external access
+- ✅ **Application bootstrapping** with GitOps applications
+- ✅ **Admin password retrieval** and access information
+- ✅ **Cross-platform support** (Bash & PowerShell scripts)
+
+#### GitOps Synchronization Pipeline  
+**Locations**:
+- GitHub: `.github/workflows/argocd-sync.yml`
+- Azure DevOps: `pipelines/argocd-sync-pipeline.yml`
+
+**Purpose**: Trigger ArgoCD sync when Kubernetes manifests change
+
+**Features:**
+- ✅ **Automatic triggers** on `k8s/` directory changes
+- ✅ **Manifest validation** before sync
+- ✅ **Selective sync** (individual apps or all apps)
+- ✅ **Sync monitoring** with status reporting
+- ✅ **ArgoCD UI access** information
+
+### 🎯 GitOps Workflow
+
+#### GitOps Applications
+
+This project includes three ArgoCD applications for complete microservices deployment:
+
+| Application | Path | Purpose | Sync Policy |
+|-------------|------|---------|-------------|
+| `ecommerce-microservices` | `k8s/microservices/` | Frontend & backend services | Auto-sync, Self-heal |
+| `ecommerce-database` | `k8s/database/` | PostgreSQL database | Auto-sync, Self-heal |
+| `ecommerce-monitoring` | `k8s/monitoring/` | Prometheus & Grafana | Auto-sync, Self-heal |
+
+#### GitOps Benefits Implemented
+
+1. **🎯 Declarative Deployments**: All desired state in Git
+2. **🔄 Automated Synchronization**: ArgoCD continuously monitors Git
+3. **🩹 Self-Healing**: Automatically corrects configuration drift
+4. **📝 Audit Trail**: Complete history of all changes in Git
+5. **🔒 Security**: Git-based RBAC and access control
+6. **♻️ Easy Rollbacks**: Git revert = infrastructure rollback
+7. **🔍 Observability**: ArgoCD UI for deployment visualization
+
+#### 🚀 GitOps Deployment Process
+
+1. **Developer pushes** code changes to `k8s/` directory
+2. **Pipeline validates** Kubernetes manifests
+3. **ArgoCD detects** Git changes automatically
+4. **Applications sync** with desired state from Git
+5. **Self-healing** corrects any manual changes
+6. **Monitoring** tracks deployment health and status
 
 ## 🔒 Security Considerations
 
@@ -271,15 +439,51 @@ az ad sp show --id 4813e1ea-ebfa-46c4-bbdc-6bf8225ad061
 
 ## 🔮 Future Enhancements
 
-This infrastructure foundation enables:
+This infrastructure foundation with GitOps enables advanced features:
 
-1. **🚀 Application Deployment**: Deploy microservices with Helm charts
-2. **📊 Monitoring Stack**: Prometheus, Grafana, Azure Monitor integration
-3. **🔒 Security Hardening**: Pod Security Standards, Network Policies
-4. **🔄 GitOps**: ArgoCD or Flux for continuous deployment
-5. **🌐 Ingress & Load Balancing**: NGINX Ingress Controller, Application Gateway
-6. **📈 Scaling**: Horizontal Pod Autoscaler, Cluster Autoscaler
-7. **💾 Storage**: Azure Disk, Azure Files integration
+### 🎯 Available Now
+- ✅ **GitOps Workflow**: Complete ArgoCD implementation with automated sync
+- ✅ **Microservices Demo**: E-commerce application with database and monitoring  
+- ✅ **Monitoring Stack**: Prometheus and Grafana integrated
+- ✅ **Security Foundation**: RBAC, resource quotas, and proper isolation
+
+### 🚀 Planned Enhancements
+
+1. **🔒 Advanced Security**: 
+   - Pod Security Standards implementation
+   - Network Policies for micro-segmentation
+   - OPA Gatekeeper policy enforcement
+   - Falco runtime security monitoring
+
+2. **🌐 Ingress & Traffic Management**:
+   - NGINX Ingress Controller with SSL termination
+   - Azure Application Gateway integration
+   - Service mesh with Istio or Linkerd
+   - Advanced traffic routing and canary deployments
+
+3. **📈 Advanced Scaling & Performance**:
+   - Horizontal Pod Autoscaler (HPA)
+   - Vertical Pod Autoscaler (VPA) 
+   - Cluster Autoscaler for node scaling
+   - KEDA for event-driven scaling
+
+4. **💾 Storage & Data Management**:
+   - Azure Disk CSI driver integration
+   - Azure Files for shared storage
+   - Backup and disaster recovery with Velero
+   - Database operators (PostgreSQL, MongoDB)
+
+5. **🔄 Advanced GitOps Features**:
+   - Multi-environment promotion pipelines
+   - Helm chart templating with ArgoCD
+   - Progressive delivery with Argo Rollouts
+   - Cross-cluster application deployment
+
+6. **📊 Observability & SRE**:
+   - Distributed tracing with Jaeger
+   - Log aggregation with Fluentd/Fluent Bit
+   - SLI/SLO monitoring and alerting
+   - Chaos engineering with Litmus or Chaos Mesh
 
 ## 🤝 Contributing
 

@@ -1,0 +1,32 @@
+# ArgoCD Installation Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    name: argocd
+    app.kubernetes.io/name: argocd
+    app.kubernetes.io/part-of: argocd
+---
+# ArgoCD Server Service - LoadBalancer for external access
+apiVersion: v1
+kind: Service
+metadata:
+  name: argocd-server-loadbalancer
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-server
+    app.kubernetes.io/part-of: argocd
+spec:
+  type: LoadBalancer
+  ports:
+  - name: https
+    port: 443
+    targetPort: 8080
+    protocol: TCP
+  - name: grpc
+    port: 443
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app.kubernetes.io/name: argocd-server

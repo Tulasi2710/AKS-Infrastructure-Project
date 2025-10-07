@@ -1,0 +1,73 @@
+# ArgoCD Project for E-commerce Applications
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: ecommerce
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: ecommerce-project
+    app.kubernetes.io/part-of: argocd
+spec:
+  description: E-commerce microservices project for AKS deployment
+  
+  # Source repositories that applications within this project can pull from
+  sourceRepos:
+  - 'https://github.com/Tulasi2710/AKS-Infrastructure-Project.git'
+  - 'https://github.com/Tulasi2710/*'  # Allow other repos from same owner
+  
+  # Destination clusters and namespaces where applications may be deployed
+  destinations:
+  - namespace: 'ecommerce*'
+    server: https://kubernetes.default.svc
+  - namespace: 'monitoring'
+    server: https://kubernetes.default.svc
+  - namespace: 'default'
+    server: https://kubernetes.default.svc
+    
+  # Cluster-scoped resources which may be managed
+  clusterResourceWhitelist:
+  - group: ''
+    kind: Namespace
+  - group: 'rbac.authorization.k8s.io'
+    kind: ClusterRole
+  - group: 'rbac.authorization.k8s.io'
+    kind: ClusterRoleBinding
+    
+  # Namespace-scoped resources which may be managed
+  namespaceResourceWhitelist:
+  - group: ''
+    kind: ConfigMap
+  - group: ''
+    kind: Secret
+  - group: ''
+    kind: Service
+  - group: ''
+    kind: ServiceAccount
+  - group: ''
+    kind: PersistentVolumeClaim
+  - group: 'apps'
+    kind: Deployment
+  - group: 'apps'
+    kind: ReplicaSet
+  - group: 'networking.k8s.io'
+    kind: Ingress
+  - group: 'networking.k8s.io'
+    kind: NetworkPolicy
+    
+  # Roles which provide RBAC access to this project
+  roles:
+  - name: ecommerce-admin
+    description: Full access to ecommerce project applications
+    policies:
+    - p, proj:ecommerce:ecommerce-admin, applications, *, ecommerce/*, allow
+    - p, proj:ecommerce:ecommerce-admin, repositories, *, *, allow
+    groups:
+    - 'ecommerce-admins'
+    
+  - name: ecommerce-developer
+    description: Limited access for developers
+    policies:
+    - p, proj:ecommerce:ecommerce-developer, applications, get, ecommerce/*, allow
+    - p, proj:ecommerce:ecommerce-developer, applications, sync, ecommerce/*, allow
+    groups:
+    - 'ecommerce-developers'

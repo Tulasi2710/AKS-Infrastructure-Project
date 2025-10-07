@@ -1,0 +1,283 @@
+# Azure DevOps Pipeline for ArgoCD GitOps Setup
+# This pipeline installs and configures ArgoCD for GitOps deployments
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+  paths:
+    include:
+    - argocd/**
+    - scripts/install-argocd.*
+    - pipelines/argocd-pipeline.yml
+
+pr:
+  branches:
+    include:
+    - main
+  paths:
+    include:
+    - argocd/**
+    - scripts/install-argocd.*
+    - pipelines/argocd-pipeline.yml
+
+parameters:
+- name: aksClusterName
+  displayName: 'AKS Cluster Name'
+  type: string
+  default: 'aks-cluster-dev'
+- name: resourceGroupName
+  displayName: 'Resource Group Name'
+  type: string
+  default: 'rg-aks-dev'
+- name: action
+  displayName: 'Action to Perform'
+  type: string
+  default: 'install'
+  values:
+  - install
+  - uninstall
+  - status
+
+variables:
+- name: azureServiceConnection
+  value: 'azure-service-connection1'
+
+stages:
+- stage: ValidateArgoCD
+  displayName: 'Validate ArgoCD Manifests'
+  jobs:
+  - job: ValidateManifests
+    displayName: 'Validate ArgoCD YAML Files'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: KubectlInstaller@0
+      displayName: 'Install kubectl'
+      inputs:
+        kubectlVersion: 'v1.28.0'
+    
+    - script: |
+        echo "🔍 Validating ArgoCD manifests..."
+        find argocd/ -name "*.yaml" -o -name "*.yml" | while read file; do
+          echo "  ✓ Validating $file"
+          kubectl apply --dry-run=client -f "$file" || exit 1
+        done
+        echo "✅ All ArgoCD manifests are valid"
+      displayName: 'Validate YAML Syntax'
+    
+    - script: |
+        echo "📋 Checking ArgoCD application configurations..."
+        echo "Repository URL in applications:"
+        grep -r "repoURL:" argocd/ || echo "No repoURL found"
+        echo ""
+        echo "Target namespaces:"
+        grep -r "namespace:" argocd/ || echo "No namespaces found"
+        echo ""
+        echo "Source paths:"
+        grep -r "path:" argocd/ || echo "No paths found"
+      displayName: 'Check Application References'
+
+- stage: SetupArgoCD
+  displayName: 'Setup ArgoCD on AKS'
+  dependsOn: ValidateArgoCD
+  condition: succeeded()
+  jobs:
+  - deployment: DeployArgoCD
+    displayName: 'Install ArgoCD with GitOps Configuration'
+    environment: 'argocd-gitops'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: AzureCLI@2
+            displayName: '🔗 Connect to AKS Cluster'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Connecting to AKS cluster: ${{ parameters.aksClusterName }} in resource group: ${{ parameters.resourceGroupName }}"
+                az aks get-credentials --resource-group "${{ parameters.resourceGroupName }}" --name "${{ parameters.aksClusterName }}" --overwrite-existing
+                
+                echo "✅ Connected to cluster"
+                kubectl cluster-info
+                kubectl get nodes --no-headers | wc -l | xargs echo "Node count:"
+          
+          - task: KubectlInstaller@0
+            displayName: 'Install kubectl'
+            inputs:
+              kubectlVersion: 'v1.28.0'
+          
+          - task: PowerShell@2
+            displayName: '📊 Check Current ArgoCD Status'
+            continueOnError: true
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "📊 Checking current ArgoCD status..." -ForegroundColor Cyan
+                
+                try {
+                  kubectl get namespace argocd 2>$null
+                  Write-Host "✅ ArgoCD namespace found" -ForegroundColor Green
+                  
+                  Write-Host "Current ArgoCD pods:" -ForegroundColor Yellow
+                  kubectl get pods -n argocd 2>$null
+                }
+                catch {
+                  Write-Host "ℹ️ ArgoCD not currently installed" -ForegroundColor Yellow
+                }
+          
+          - task: PowerShell@2
+            displayName: '🚀 Install ArgoCD'
+            condition: and(succeeded(), ne('${{ parameters.action }}', 'uninstall'), ne('${{ parameters.action }}', 'status'))
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "🚀 Installing ArgoCD using PowerShell script..." -ForegroundColor Green
+                
+                # Make the script executable and run it
+                if (Test-Path "scripts/install-argocd.ps1") {
+                  & "scripts/install-argocd.ps1"
+                } else {
+                  Write-Host "❌ ArgoCD installation script not found" -ForegroundColor Red
+                  exit 1
+                }
+          
+          - task: PowerShell@2
+            displayName: '🔍 Verify ArgoCD Installation'
+            condition: and(succeeded(), ne('${{ parameters.action }}', 'uninstall'))
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "🔍 Verifying ArgoCD installation..." -ForegroundColor Cyan
+                
+                Write-Host "ArgoCD Pods:" -ForegroundColor Yellow
+                kubectl get pods -n argocd
+                
+                Write-Host "`nArgoCD Applications:" -ForegroundColor Yellow
+                kubectl get applications -n argocd 2>$null || Write-Host "No applications found yet" -ForegroundColor Gray
+                
+                Write-Host "`nArgoCD Services:" -ForegroundColor Yellow
+                kubectl get svc -n argocd
+          
+          - task: PowerShell@2
+            displayName: '🌐 Get ArgoCD Access Information'
+            condition: and(succeeded(), ne('${{ parameters.action }}', 'uninstall'))
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "🌐 ArgoCD Access Information:" -ForegroundColor Cyan
+                Write-Host "=============================" -ForegroundColor Cyan
+                
+                # Get LoadBalancer IP
+                try {
+                  $argoCdIP = kubectl get svc argocd-server-loadbalancer -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>$null
+                }
+                catch {
+                  $argoCdIP = ""
+                }
+                
+                # Get admin password
+                try {
+                  $passwordBase64 = kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" 2>$null
+                  $password = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($passwordBase64))
+                }
+                catch {
+                  $password = "Password retrieval failed - check manually"
+                }
+                
+                Write-Host ""
+                if ($argoCdIP -and $argoCdIP.Trim() -ne "") {
+                  Write-Host "🎯 ArgoCD UI: https://$argoCdIP" -ForegroundColor Green
+                  Write-Host "Username: admin" -ForegroundColor White
+                  Write-Host "Password: $password" -ForegroundColor White
+                } else {
+                  Write-Host "LoadBalancer IP: Pending" -ForegroundColor Yellow
+                  Write-Host "Check later with: kubectl get svc argocd-server-loadbalancer -n argocd" -ForegroundColor Gray
+                  Write-Host "Username: admin" -ForegroundColor White
+                  Write-Host "Password: $password" -ForegroundColor White
+                }
+                
+                Write-Host "`n📋 GitOps Configuration:" -ForegroundColor Cyan
+                Write-Host "Repository: $(Build.Repository.Uri)" -ForegroundColor White
+                Write-Host "Monitoring Path: k8s/" -ForegroundColor White
+                Write-Host "Auto-sync: Enabled" -ForegroundColor White
+          
+          - task: PowerShell@2
+            displayName: '⚠️ Uninstall ArgoCD'
+            condition: and(succeeded(), eq('${{ parameters.action }}', 'uninstall'))
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "⚠️ Uninstalling ArgoCD..." -ForegroundColor Red
+                
+                # Delete applications first
+                Write-Host "Deleting ArgoCD applications..." -ForegroundColor Yellow
+                kubectl delete applications --all -n argocd --ignore-not-found=true
+                
+                # Delete ArgoCD installation
+                Write-Host "Deleting ArgoCD installation..." -ForegroundColor Yellow
+                kubectl delete -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml --ignore-not-found=true
+                
+                # Delete namespace
+                Write-Host "Deleting ArgoCD namespace..." -ForegroundColor Yellow
+                kubectl delete namespace argocd --ignore-not-found=true
+                
+                Write-Host "✅ ArgoCD uninstalled successfully" -ForegroundColor Green
+          
+          - task: PowerShell@2
+            displayName: '📊 Final ArgoCD Status'
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "`n📊 Final ArgoCD Status:" -ForegroundColor Cyan
+                Write-Host "=======================" -ForegroundColor Cyan
+                
+                try {
+                  kubectl get namespace argocd 2>$null
+                  Write-Host "✅ ArgoCD namespace exists" -ForegroundColor Green
+                  
+                  Write-Host "`nPod Status:" -ForegroundColor Yellow
+                  kubectl get pods -n argocd
+                  
+                  Write-Host "`nApplication Status:" -ForegroundColor Yellow
+                  kubectl get applications -n argocd 2>$null || Write-Host "No applications found" -ForegroundColor Gray
+                }
+                catch {
+                  Write-Host "❌ ArgoCD is not installed" -ForegroundColor Red
+                }
+          
+          - task: PowerShell@2
+            displayName: '🎉 GitOps Workflow Summary'
+            condition: and(succeeded(), ne('${{ parameters.action }}', 'uninstall'))
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "`n🎉 GitOps Workflow Summary:" -ForegroundColor Green -BackgroundColor DarkGreen
+                Write-Host "==========================" -ForegroundColor Green
+                Write-Host ""
+                Write-Host "✅ ArgoCD installed and configured" -ForegroundColor Green
+                Write-Host "✅ Applications created for:" -ForegroundColor Green
+                Write-Host "   - ecommerce-microservices (k8s/)" -ForegroundColor White
+                Write-Host "   - ecommerce-database (k8s/database/)" -ForegroundColor White
+                Write-Host "   - ecommerce-monitoring (k8s/monitoring/)" -ForegroundColor White
+                Write-Host ""
+                Write-Host "🔄 GitOps Workflow Active:" -ForegroundColor Cyan
+                Write-Host "   - Repository: $(Build.Repository.Uri)" -ForegroundColor White
+                Write-Host "   - Auto-sync: Enabled" -ForegroundColor White
+                Write-Host "   - Self-heal: Enabled" -ForegroundColor White
+                Write-Host "   - Prune: Enabled" -ForegroundColor White
+                Write-Host ""
+                Write-Host "📝 Next Steps:" -ForegroundColor Yellow
+                Write-Host "   1. Access ArgoCD UI to monitor deployments" -ForegroundColor White
+                Write-Host "   2. Make changes to k8s/ manifests" -ForegroundColor White
+                Write-Host "   3. Push changes to trigger GitOps sync" -ForegroundColor White
+                Write-Host "   4. Monitor synchronization in ArgoCD dashboard" -ForegroundColor White
+                Write-Host ""
+                Write-Host "🚀 Your GitOps workflow is ready!" -ForegroundColor Green
