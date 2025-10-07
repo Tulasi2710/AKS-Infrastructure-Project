@@ -56,6 +56,11 @@ module "aks" {
   node_vm_size        = var.node_vm_size
   subnet_id           = module.networking.aks_subnet_id
 
+  # Network configuration to avoid CIDR conflicts
+  service_cidr       = var.service_cidr
+  dns_service_ip     = var.dns_service_ip
+  docker_bridge_cidr = var.docker_bridge_cidr
+
   tags = local.common_tags
 
   depends_on = [module.networking]
