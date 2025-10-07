@@ -1,13 +1,30 @@
-# Example Terraform Variables for Development Environment
-# Copy this file to terraform.tfvars and customize the values
+# Development Environment Variables# Example Terraform Variables for Development Environment
 
-# Azure region where resources will be deployed
-location = "East US"
+# Copy this file to terraform.tfvars and customize the values for your environment# Copy this file to terraform.tfvars and customize the values
 
-# Virtual network configuration
-vnet_address_space = ["10.0.0.0/16"]
-aks_subnet_cidr    = "10.0.1.0/24"
 
-# AKS cluster configuration
-node_count   = 2
-node_vm_size = "Standard_D2s_v3"
+
+# Resource Group Configuration# Azure region where resources will be deployed
+
+location = "East US"  # Change to your preferred Azure regionlocation = "East US"
+
+
+
+# Networking Configuration# Virtual network configuration
+
+vnet_address_space = ["10.0.0.0/16"]     # Virtual network address spacevnet_address_space = ["10.0.0.0/16"]
+
+aks_subnet_cidr    = "10.0.1.0/24"       # AKS nodes subnetaks_subnet_cidr    = "10.0.1.0/24"
+
+
+
+# AKS Configuration# AKS cluster configuration
+
+node_count   = 2                          # Initial number of worker nodesnode_count   = 2
+
+node_vm_size = "Standard_D2s_v6"         # VM size (ensure availability in your region)node_vm_size = "Standard_D2s_v3"
+
+# AKS Network Configuration (avoid CIDR conflicts with VNet)
+service_cidr       = "172.16.0.0/16"     # Kubernetes services network
+dns_service_ip     = "172.16.0.10"       # DNS service IP (must be within service_cidr)
+docker_bridge_cidr = "172.17.0.1/16"     # Docker bridge network

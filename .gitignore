@@ -1,47 +1,30 @@
-# Terraform files# Terraform files
+# Terraform files
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+*.tfplan
+*.tfstate.*
 
-.terraform/.terraform/
+# Terraform provider binaries (large files)
+terraform/environments/*/.terraform/providers/
 
-.terraform.lock.hcl.terraform.lock.hcl
+# OS files
+.DS_Store
+Thumbs.db
 
-terraform.tfstateterraform.tfstate
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
 
-terraform.tfstate.backupterraform.tfstate.backup
+# Logs
+*.log
 
-*.tfplan*.tfplan
+# Environment files
+.env
+.env.local
 
-*.tfstate.**.tfstate.*
-
-
-
-# OS files# OS files
-
-.DS_Store.DS_Store
-
-Thumbs.dbThumbs.db
-
-
-
-# IDE files# IDE files
-
-.vscode/.vscode/
-
-.idea/.idea/
-
-*.swp*.swp
-
-*.swo*.swo
-
-
-
-# Logs# Logs
-
-*.log*.log
-
-
-
-# Environment files# Environment files
-
-.env.env
-
-.env.local.env.local
+# Azure CLI files
+.azure/
