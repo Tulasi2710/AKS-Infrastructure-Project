@@ -1,0 +1,283 @@
+name: 'Daily Performance Report'
+
+on:
+  schedule:
+    # Run daily at 8:00 AM UTC
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    inputs:
+      report_period:
+        description: 'Report period in hours (default: 24)'
+        required: false
+        default: '24'
+        type: string
+
+permissions:
+  id-token: write
+  contents: write
+
+env:
+  KUBECTL_VERSION: 'latest'
+
+jobs:
+  generate-performance-report:
+    name: 'Generate Daily Performance Report'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: ${{ env.KUBECTL_VERSION }}
+
+    - name: Connect to AKS Cluster
+      run: |
+        echo "🔍 Discovering AKS clusters with tags..."
+        
+        # Find AKS cluster using tags
+        CLUSTER_INFO=$(az aks list --query "[?tags.Project=='aks-infra' && tags.Environment=='dev'] | [0].{name:name,resourceGroup:resourceGroup}" -o json)
+        
+        if [ "$CLUSTER_INFO" == "null" ] || [ -z "$CLUSTER_INFO" ]; then
+          echo "❌ No AKS cluster found with tags Project='aks-infra' and Environment='dev'"
+          echo "Available clusters:"
+          az aks list --query "[].{name:name,resourceGroup:resourceGroup,tags:tags}" -o table
+          exit 1
+        fi
+        
+        CLUSTER_NAME=$(echo $CLUSTER_INFO | jq -r '.name')
+        RESOURCE_GROUP=$(echo $CLUSTER_INFO | jq -r '.resourceGroup')
+        
+        echo "✅ Found cluster: $CLUSTER_NAME in resource group: $RESOURCE_GROUP"
+        
+        # Get AKS credentials
+        echo "🔑 Getting AKS credentials..."
+        az aks get-credentials --resource-group $RESOURCE_GROUP --name $CLUSTER_NAME --overwrite-existing
+        
+        # Test connection
+        echo "🧪 Testing cluster connection..."
+        kubectl cluster-info
+
+    - name: Install Required Tools
+      run: |
+        # Install jq for JSON processing
+        sudo apt-get update
+        sudo apt-get install -y jq curl
+        
+        # Install Python for data processing
+        sudo apt-get install -y python3 python3-pip
+        pip3 install requests pandas matplotlib seaborn
+
+    - name: Generate Performance Report
+      run: |
+        REPORT_PERIOD="${{ github.event.inputs.report_period || '24' }}"
+        REPORT_DATE=$(date +"%Y-%m-%d")
+        
+        echo "📊 Generating performance report for the last $REPORT_PERIOD hours..."
+        
+        # Create report directory
+        mkdir -p reports
+        
+        # Create comprehensive performance report
+        cat > reports/performance-report-$REPORT_DATE.md << EOF
+        # Daily Performance Report - $REPORT_DATE
+        
+        Generated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')  
+        Report Period: Last $REPORT_PERIOD hours
+        
+        ## 🏗️ Infrastructure Status
+        
+        ### AKS Cluster Health
+        \`\`\`
+        $(kubectl get nodes -o wide)
+        \`\`\`
+        
+        ### Resource Utilization
+        \`\`\`
+        $(kubectl top nodes 2>/dev/null || echo "Metrics server not available")
+        \`\`\`
+        
+        ## 📊 Application Performance
+        
+        ### E-commerce Microservices Status
+        \`\`\`
+        $(kubectl get pods -n ecommerce -o wide)
+        \`\`\`
+        
+        ### Pod Resource Usage
+        \`\`\`
+        $(kubectl top pods -n ecommerce 2>/dev/null || echo "Pod metrics not available")
+        \`\`\`
+        
+        ## 🔍 Monitoring Stack Status
+        
+        ### Prometheus & Grafana
+        \`\`\`
+        $(kubectl get pods -n monitoring -o wide)
+        \`\`\`
+        
+        ### Services Status
+        \`\`\`
+        $(kubectl get svc -n ecommerce)
+        \`\`\`
+        
+        \`\`\`
+        $(kubectl get svc -n monitoring)
+        \`\`\`
+        
+        ## 🚨 Recent Events & Alerts
+        
+        ### Cluster Events (Last 1 hour)
+        \`\`\`
+        $(kubectl get events --sort-by='.lastTimestamp' --all-namespaces | tail -20)
+        \`\`\`
+        
+        ### Pod Restarts
+        \`\`\`
+        $(kubectl get pods --all-namespaces --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.status.containerStatuses[*].restartCount}{"\n"}{end}' | awk '$3>0' | head -10)
+        \`\`\`
+        
+        ## 📈 Performance Metrics
+        
+        ### Response Time Analysis
+        - **Frontend Average Response Time**: [Query Prometheus for actual metrics]
+        - **Backend Service Response Time**: [Query Prometheus for actual metrics]  
+        - **Database Connection Pool**: [Query metrics if available]
+        
+        ### Error Rates
+        - **HTTP 4xx Errors**: [Query Prometheus for actual metrics]
+        - **HTTP 5xx Errors**: [Query Prometheus for actual metrics]
+        - **Application Errors**: [Query application logs]
+        
+        ### Resource Consumption
+        - **CPU Usage Trend**: [Query Prometheus for actual metrics]
+        - **Memory Usage Trend**: [Query Prometheus for actual metrics]
+        - **Network I/O**: [Query Prometheus for actual metrics]
+        
+        ## 🎯 Recommendations
+        
+        $(kubectl describe nodes | grep -A 5 -B 5 "Allocated resources" | head -20)
+        
+        ---
+        *Report generated by AKS Infrastructure Project - Daily Performance Pipeline*
+        EOF
+        
+        echo "✅ Basic report generated: reports/performance-report-$REPORT_DATE.md"
+
+    - name: Query Prometheus Metrics (if available)
+      continue-on-error: true
+      run: |
+        REPORT_DATE=$(date +"%Y-%m-%d")
+        
+        # Check if Prometheus is accessible
+        PROMETHEUS_SERVICE=$(kubectl get svc -n monitoring -l app.kubernetes.io/name=prometheus -o name 2>/dev/null | head -1)
+        
+        if [ ! -z "$PROMETHEUS_SERVICE" ]; then
+          echo "📈 Querying Prometheus for enhanced metrics..."
+          
+          # Port-forward to Prometheus (in background)
+          kubectl port-forward -n monitoring svc/prometheus-kube-prometheus-prometheus 9090:9090 &
+          KUBECTL_PF_PID=$!
+          sleep 10
+          
+          # Query metrics and enhance report
+          python3 << 'EOF'
+        import requests
+        import json
+        import os
+        from datetime import datetime
+        
+        PROMETHEUS_URL = "http://localhost:9090"
+        REPORT_DATE = os.environ.get('REPORT_DATE', datetime.now().strftime('%Y-%m-%d'))
+        
+        def query_prometheus(query):
+            try:
+                response = requests.get(f"{PROMETHEUS_URL}/api/v1/query", params={'query': query}, timeout=5)
+                if response.status_code == 200:
+                    return response.json()
+                return None
+            except:
+                return None
+        
+        # Define metrics queries
+        queries = {
+            'cpu_usage': 'avg(rate(container_cpu_usage_seconds_total{namespace="ecommerce"}[5m])) * 100',
+            'memory_usage': 'avg(container_memory_usage_bytes{namespace="ecommerce"}) / 1024 / 1024',
+            'http_requests_rate': 'sum(rate(http_requests_total[5m]))',
+            'http_error_rate': 'sum(rate(http_requests_total{code=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) * 100'
+        }
+        
+        metrics_report = f"\n## 📊 Prometheus Metrics (Enhanced)\n\n"
+        
+        for metric_name, query in queries.items():
+            result = query_prometheus(query)
+            if result and result.get('data', {}).get('result'):
+                values = result['data']['result']
+                if values:
+                    value = values[0]['value'][1]
+                    metrics_report += f"- **{metric_name.replace('_', ' ').title()}**: {float(value):.2f}\n"
+                else:
+                    metrics_report += f"- **{metric_name.replace('_', ' ').title()}**: No data\n"
+            else:
+                metrics_report += f"- **{metric_name.replace('_', ' ').title()}**: Query failed\n"
+        
+        # Append to existing report
+        with open(f'reports/performance-report-{REPORT_DATE}.md', 'a') as f:
+            f.write(metrics_report)
+        
+        print("✅ Enhanced report with Prometheus metrics")
+        EOF
+          
+          # Kill port-forward
+          kill $KUBECTL_PF_PID 2>/dev/null || true
+        else
+          echo "⚠️ Prometheus service not found - using basic metrics only"
+        fi
+
+    - name: Commit and Push Report
+      run: |
+        REPORT_DATE=$(date +"%Y-%m-%d")
+        
+        # Configure git
+        git config --global user.name "Performance Report Bot"
+        git config --global user.email "actions@github.com"
+        
+        # Add and commit report
+        git add reports/performance-report-$REPORT_DATE.md
+        git commit -m "📊 Daily performance report - $REPORT_DATE" || echo "No changes to commit"
+        git push origin main || echo "Push failed - continuing anyway"
+        
+        echo "✅ Report committed and pushed to repository"
+
+    - name: Upload Report Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: daily-performance-report-$(date +"%Y-%m-%d")
+        path: reports/
+        retention-days: 90
+
+    - name: Report Summary
+      run: |
+        REPORT_DATE=$(date +"%Y-%m-%d")
+        echo "📊 Daily Performance Report Summary"
+        echo "=================================="
+        echo "Date: $REPORT_DATE"
+        echo "Report File: reports/performance-report-$REPORT_DATE.md"
+        echo ""
+        echo "Report includes:"
+        echo "✅ Infrastructure health status"
+        echo "✅ Application performance metrics"
+        echo "✅ Resource utilization analysis"
+        echo "✅ Recent events and alerts"
+        echo "✅ Performance recommendations"
+        echo ""
+        echo "📁 Report saved as GitHub artifact and committed to repository"

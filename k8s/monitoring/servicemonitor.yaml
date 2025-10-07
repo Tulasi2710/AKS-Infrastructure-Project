@@ -1,0 +1,77 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ecommerce-monitoring
+  namespace: monitoring
+  labels:
+    app: ecommerce
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+    - ecommerce
+  selector:
+    matchLabels:
+      monitor: "true"
+  endpoints:
+  - port: http
+    interval: 30s
+    path: /metrics
+---
+# PrometheusRule for alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ecommerce-alerts
+  namespace: monitoring
+  labels:
+    app: ecommerce
+    release: prometheus
+spec:
+  groups:
+  - name: ecommerce.rules
+    rules:
+    - alert: HighResponseTime
+      expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=~"ecommerce-.*"}[5m])) > 0.5
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High response time detected"
+        description: "95th percentile response time is above 500ms for {{ $labels.job }}"
+    
+    - alert: HighErrorRate
+      expr: rate(http_requests_total{job=~"ecommerce-.*",code=~"5.."}[5m]) / rate(http_requests_total{job=~"ecommerce-.*"}[5m]) > 0.1
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "High error rate detected"
+        description: "Error rate is above 10% for {{ $labels.job }}"
+    
+    - alert: PodCrashLooping
+      expr: increase(kube_pod_container_status_restarts_total{namespace="ecommerce"}[1h]) > 5
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Pod is crash looping"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is crash looping"
+    
+    - alert: HighCPUUsage
+      expr: sum(rate(container_cpu_usage_seconds_total{namespace="ecommerce"}[5m])) by (pod) > 0.8
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High CPU usage"
+        description: "Pod {{ $labels.pod }} is using more than 80% CPU"
+    
+    - alert: HighMemoryUsage
+      expr: sum(container_memory_usage_bytes{namespace="ecommerce"}) by (pod) / sum(container_spec_memory_limit_bytes{namespace="ecommerce"}) by (pod) > 0.9
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High memory usage"
+        description: "Pod {{ $labels.pod }} is using more than 90% of its memory limit"

@@ -51,6 +51,35 @@ jobs:
       run: terraform fmt -recursive
       working-directory: ./terraform
 
+    - name: Setup Python for Checkov
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install Checkov
+      run: |
+        pip install checkov
+        
+    - name: Terraform Security Scan (Checkov)
+      run: |
+        echo "🔍 Running Terraform security scan with Checkov..."
+        checkov -d ./terraform \
+          --framework terraform \
+          --output cli \
+          --output json \
+          --output-file-path ./,./checkov-results.json \
+          --soft-fail \
+          --compact
+      continue-on-error: true
+
+    - name: Upload Checkov Results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: checkov-security-scan-results
+        path: checkov-results.json
+        retention-days: 30
+
     - name: Terraform Init
       env:
         ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
