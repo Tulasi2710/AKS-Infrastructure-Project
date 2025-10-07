@@ -1,33 +1,43 @@
-# AKS Infrastructure Deployment Guide
+# 🚀 AKS Infrastructure Deployment Guide
 
-This guide provides step-by-step instructions for deploying the AKS infrastructure using Terraform.
+**Ready-to-deploy infrastructure with automated CI/CD pipelines**
 
-## 🚀 Quick Deployment
+## ⚡ Quick Start (Recommended)
 
-### Option 1: Local Development
+### GitHub Actions Deployment (Primary Method)
 
-```bash
-# 1. Navigate to the development environment
-cd terraform/environments/dev
+**Prerequisites:**
+- GitHub account with this repository forked/cloned
+- Azure subscription: `f4d6b5a0-37f2-49d8-85ea-fe757f8cf6b1`
 
-# 2. Copy and configure variables
-cp terraform.tfvars.template terraform.tfvars
-# Edit terraform.tfvars with your specific values
+**Steps:**
+1. **Configure GitHub Secrets** (Repository Settings → Secrets and Variables → Actions):
+   ```
+   AZURE_CLIENT_ID = 4813e1ea-ebfa-46c4-bbdc-6bf8225ad061
+   AZURE_TENANT_ID = <your-tenant-id>
+   AZURE_SUBSCRIPTION_ID = f4d6b5a0-37f2-49d8-85ea-fe757f8cf6b1
+   TF_STATE_RESOURCE_GROUP = TulasiteraformRG
+   TF_STATE_STORAGE_ACCOUNT = tulasiteraformstfile
+   ```
 
-# 3. Initialize Terraform (local state)
-terraform init
+2. **Create Production Environment** (Repository Settings → Environments):
+   - Click "New environment"
+   - Name: `production`
+   - Add protection rules as needed
 
-# 4. Plan the deployment
-terraform plan -var-file="terraform.tfvars"
+3. **Trigger Deployment**:
+   - Push to main branch, OR
+   - Go to Actions tab → "Terraform AKS Infrastructure" → "Run workflow"
 
-# 5. Apply the infrastructure
-terraform apply -var-file="terraform.tfvars"
-```
+4. **Monitor & Approve**:
+   - Watch progress in Actions tab
+   - Approve deployment when prompted
 
-### Option 2: Production with Remote State
+**⏱️ Total deployment time: ~10-15 minutes**
 
-```bash
-# 1. Create Azure Storage for Terraform state
+## 💻 Local Development (Optional)
+
+For testing and validation:
 az group create --name "rg-tfstate" --location "East US"
 az storage account create --name "sttfstate$(date +%s)" --resource-group "rg-tfstate" --location "East US" --sku "Standard_LRS"
 az storage container create --name "tfstate" --account-name "<storage-account-name>"

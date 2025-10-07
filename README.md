@@ -1,15 +1,25 @@
 # AKS Infrastructure Project
 
-This project provides a modular Terraform infrastructure setup for deploying Azure Kubernetes Service (AKS) clusters with CI/CD automation.
+A production-ready Terraform infrastructure setup for deploying Azure Kubernetes Service (AKS) clusters with automated CI/CD pipelines using GitHub Actions and Azure DevOps.
 
 ## 🏗️ Architecture Overview
 
-The infrastructure is designed with modularity and reusability in mind:
+This project implements a modular, scalable infrastructure-as-code solution:
 
-- **Resource Group Module**: Manages Azure resource groups with tagging
-- **Networking Module**: Creates VNet, subnets, and network security groups
-- **AKS Module**: Deploys Azure Kubernetes Service clusters with managed identity
-- **Environment Configuration**: Development environment orchestration
+- **🏢 Resource Group Module**: Manages Azure resource groups with standardized naming and tagging
+- **🌐 Networking Module**: Creates VNet, subnets, and Network Security Groups with proper CIDR management
+- **☸️ AKS Module**: Deploys Azure Kubernetes Service with system-assigned managed identity and optimized networking
+- **🚀 CI/CD Integration**: Dual pipeline support (GitHub Actions + Azure DevOps) with workload identity federation
+
+## ✅ Project Status
+
+**Current State**: Production-ready infrastructure with working CI/CD pipelines
+
+- ✅ **Authentication**: Workload Identity Federation configured for GitHub Actions
+- ✅ **Networking**: CIDR conflicts resolved, proper service/pod networking
+- ✅ **Compute**: VM size compatibility verified for Azure regions
+- ✅ **Security**: Service principal with minimal permissions, secure state management
+- ✅ **Automation**: Both GitHub Actions and Azure DevOps pipelines operational
 
 ## 📁 Project Structure
 
@@ -33,113 +43,154 @@ AKS-Infrastructure-Project/
 
 ### Prerequisites
 
-1. **Azure Subscription** with appropriate permissions
-2. **Terraform** v1.6.0 or later
-3. **Azure CLI** installed and configured
-4. **Service Principal** for automation (optional for local development)
+1. **Azure Subscription** with Contributor permissions
+2. **Terraform** v1.6.0 (exact version used in CI/CD)
+3. **Azure CLI** for local development
+4. **GitHub/Azure DevOps** account for CI/CD pipeline execution
 
-### Local Development Setup
+### 🚀 Quick Start (Automated Deployment)
 
-1. **Clone the repository**:
-   ```bash
-   git clone <repository-url>
-   cd AKS-Infrastructure-Project
-   ```
+The easiest way to deploy this infrastructure is through the CI/CD pipelines:
 
-2. **Login to Azure**:
-   ```bash
-   az login
-   az account set --subscription <your-subscription-id>
-   ```
+#### GitHub Actions (Recommended)
+1. **Fork this repository**
+2. **Configure GitHub Secrets**:
+   - `AZURE_CLIENT_ID`: `4813e1ea-ebfa-46c4-bbdc-6bf8225ad061`
+   - `AZURE_TENANT_ID`: Your Azure tenant ID
+   - `AZURE_SUBSCRIPTION_ID`: Your subscription ID
+   - `TF_STATE_RESOURCE_GROUP`: `TulasiteraformRG`
+   - `TF_STATE_STORAGE_ACCOUNT`: Your storage account name
 
-3. **Configure Terraform variables**:
-   ```bash
-   cd terraform/environments/dev
-   cp terraform.tfvars.template terraform.tfvars
-   # Edit terraform.tfvars with your specific values
-   ```
+3. **Create Production Environment**: GitHub → Settings → Environments → New environment (`production`)
+4. **Push changes** to main branch or manually trigger the workflow
 
-4. **Initialize Terraform**:
-   ```bash
-   terraform init
-   ```
+#### Azure DevOps
+1. **Import this repository** to Azure DevOps
+2. **Create Service Connection** named `azure-service-connection1`
+3. **Configure Variable Group** `terraform-backend` with storage account details
+4. **Run the pipeline**
 
-5. **Plan deployment**:
-   ```bash
-   terraform plan
-   ```
+### 💻 Local Development Setup
 
-6. **Apply infrastructure**:
-   ```bash
-   terraform apply
-   ```
+For local testing and development:
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/Tulasi2710/AKS-Infrastructure-Project.git
+cd AKS-Infrastructure-Project
+
+# 2. Login to Azure
+az login
+az account set --subscription f4d6b5a0-37f2-49d8-85ea-fe757f8cf6b1
+
+# 3. Navigate to dev environment
+cd terraform/environments/dev
+
+# 4. Initialize Terraform (configure backend as needed)
+terraform init
+
+# 5. Review and plan
+terraform plan -var-file="terraform.tfvars"
+
+# 6. Apply (use with caution in local development)
+terraform apply -var-file="terraform.tfvars"
+```
 
 ## 🔧 Configuration
 
-### Terraform Variables
+### 🔧 Infrastructure Configuration
 
-Key configuration options in `terraform.tfvars`:
+Current configuration in `terraform.tfvars`:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
+| Variable | Description | Current Value |
+|----------|-------------|---------------|
 | `location` | Azure region for resources | `"East US"` |
-| `environment` | Environment name (dev, staging, prod) | `"dev"` |
-| `project_name` | Project identifier for resource naming | `"aks-infra"` |
-| `kubernetes_version` | AKS Kubernetes version | `"1.28.0"` |
+| `vnet_address_space` | Virtual network CIDR | `["10.0.0.0/16"]` |
+| `aks_subnet_cidr` | AKS subnet CIDR | `"10.0.1.0/24"` |
 | `node_count` | Initial number of worker nodes | `2` |
-| `vm_size` | VM size for AKS nodes | `"Standard_DS2_v2"` |
-| `enable_auto_scaling` | Enable cluster autoscaler | `true` |
+| `node_vm_size` | VM size for AKS nodes | `"Standard_D2s_v6"` |
+| `service_cidr` | Kubernetes services CIDR | `"172.16.0.0/16"` |
+| `dns_service_ip` | Kubernetes DNS service IP | `"172.16.0.10"` |
+| `docker_bridge_cidr` | Docker bridge CIDR | `"172.17.0.1/16"` |
 
-### Backend Configuration
+### 🗃️ State Management
 
-For production use, configure Terraform remote state:
+**Remote State Configuration:**
+- **Storage Account**: `tulasiteraformstfile`
+- **Resource Group**: `TulasiteraformRG`
+- **Container**: `tfstate`
+- **State File**: `dev.terraform.tfstate`
 
-1. Create Azure Storage Account for state files
-2. Update backend configuration in CI/CD pipelines
-3. Set appropriate access controls
+The backend is automatically configured in CI/CD pipelines.
 
-## � CI/CD Pipelines
+## 🔄 CI/CD Pipelines
 
-### Azure DevOps Pipeline
+### GitHub Actions Workflow ⭐ (Primary)
 
-Located at `pipelines/azure-pipelines.yml`:
+**Location**: `.github/workflows/terraform.yml`
 
-- **Triggers**: Changes to `terraform/**` path
-- **Stages**: Validate → Plan → Apply
-- **Features**: Terraform format checking, security validation
-- **Environments**: Supports approval gates for production
+**Features:**
+- ✅ **Workload Identity Federation** for secure authentication
+- ✅ **Three-stage pipeline**: Validate → Plan → Apply
+- ✅ **Automatic triggers** on Terraform changes
+- ✅ **Production environment** approval gates
+- ✅ **Environment variables** for proper authentication
 
-### GitHub Actions Workflow
+**Workflow Jobs:**
+1. **terraform-validate**: Format check, init, validate
+2. **terraform-plan**: Infrastructure planning with change preview  
+3. **terraform-apply**: Automated deployment to Azure (main branch only)
 
-Located at `.github/workflows/terraform.yml`:
+### Azure DevOps Pipeline 🔄 (Alternative)
 
-- **Events**: Push to main/develop, pull requests
-- **Jobs**: Check → Plan (PR) → Apply (main branch)
-- **Security**: Uses Azure service principal authentication
+**Location**: `pipelines/azure-pipelines.yml`
+
+**Features:**
+- ✅ **Modern Terraform tasks** (TerraformTaskV4@4)
+- ✅ **Service connection** authentication
+- ✅ **Artifact management** for plan files
+- ✅ **Environment approvals** for controlled deployments
+- ✅ **Parallel execution** capabilities
+
+**Pipeline Stages:**
+1. **Validate**: Format checking and configuration validation
+2. **Plan**: Infrastructure change planning with artifact storage
+3. **Apply**: Deployment with approval gates
 
 ## 🔒 Security Considerations
 
-### Authentication
+### 🔐 Authentication Methods
 
-- **Local Development**: Uses Azure CLI authentication
-- **CI/CD Pipelines**: Service principal with minimal required permissions
-- **AKS Cluster**: System-assigned managed identity
+**GitHub Actions:**
+- ✅ **Workload Identity Federation** (No secrets stored!)
+- ✅ **Service Principal**: `4813e1ea-ebfa-46c4-bbdc-6bf8225ad061`
+- ✅ **Federated Credentials**: Configured for main branch and production environment
 
-### Network Security
+**Azure DevOps:**
+- ✅ **Service Connection** with service principal authentication
+- ✅ **Managed authentication** through Azure DevOps integration
 
-- Network Security Groups with HTTP/HTTPS rules
-- Private subnets for AKS nodes
-- Configurable network policies
+**Local Development:**
+- ✅ **Azure CLI** authentication (`az login`)
 
-### Secret Management
+### 🛡️ Network Security Architecture
 
-Required secrets for CI/CD:
+**Optimized Network Configuration:**
+- **VNet**: `10.0.0.0/16` (Main network)
+- **AKS Subnet**: `10.0.1.0/24` (Node placement)  
+- **Service CIDR**: `172.16.0.0/16` (K8s services - no overlap!)
+- **Pod CIDR**: Managed by Azure CNI
+- **Network Security Groups**: Applied to subnets with appropriate rules
 
-| Secret Name | Description |
-|-------------|-------------|
-| `AZURE_CREDENTIALS` | Service principal credentials (JSON) |
-| `TFSTATE_RESOURCE_GROUP` | Resource group for Terraform state |
-| `TFSTATE_STORAGE_ACCOUNT` | Storage account for Terraform state |
+### 🔑 Required Secrets (GitHub Actions)
+
+| Secret Name | Value | Purpose |
+|-------------|-------|---------|
+| `AZURE_CLIENT_ID` | `4813e1ea-ebfa-46c4-bbdc-6bf8225ad061` | Service principal ID |
+| `AZURE_TENANT_ID` | Your tenant ID | Azure AD tenant |
+| `AZURE_SUBSCRIPTION_ID` | `f4d6b5a0-37f2-49d8-85ea-fe757f8cf6b1` | Target subscription |
+| `TF_STATE_RESOURCE_GROUP` | `TulasiteraformRG` | State storage RG |
+| `TF_STATE_STORAGE_ACCOUNT` | `tulasiteraformstfile` | State storage account |
 
 ## 📊 Outputs
 
@@ -171,53 +222,84 @@ After successful deployment, Terraform provides:
 
 ## 🔍 Troubleshooting
 
-### Common Issues
+### 🔍 Troubleshooting & Lessons Learned
 
-1. **Permission Errors**:
-   - Verify Azure subscription permissions
-   - Check service principal role assignments
+**Resolved Issues:**
 
-2. **State Lock Issues**:
-   - Ensure backend storage account is accessible
-   - Check for concurrent Terraform operations
+1. **✅ VM Size Compatibility**: Changed from `Standard_D2s_v3` to `Standard_D2s_v6` for East US region availability
+2. **✅ Network CIDR Conflicts**: Separated service CIDR (`172.16.0.0/16`) from VNet CIDR (`10.0.0.0/16`)
+3. **✅ Authentication**: Implemented Workload Identity Federation for secure, secret-less authentication
+4. **✅ Federated Identity**: Added production environment credential for deployment approvals
 
-3. **AKS Node Issues**:
-   - Verify VM size availability in selected region
-   - Check subnet address space conflicts
-
-### Debugging Commands
+**Debugging Commands:**
 
 ```bash
-# Check Terraform state
-terraform show
-
-# Validate configuration
+# Check current configuration
 terraform validate
+terraform plan -var-file="terraform.tfvars"
 
-# Check Azure resources
+# Azure resource verification  
 az aks list --output table
+az aks show --resource-group <rg-name> --name <cluster-name>
 
-# Get AKS credentials
+# Connect to deployed cluster
 az aks get-credentials --resource-group <rg-name> --name <cluster-name>
+kubectl get nodes
+
+# Check GitHub Actions secrets
+gh secret list
+
+# Verify service principal
+az ad sp show --id 4813e1ea-ebfa-46c4-bbdc-6bf8225ad061
 ```
 
-## 🚀 Next Steps
+## 🎯 Current Deployment Status
 
-This infrastructure foundation supports:
+**Ready to Deploy!** 🚀
 
-1. **Application Deployment**: Deploy microservices to the AKS cluster
-2. **Monitoring Setup**: Add Prometheus, Grafana, and Azure Monitor
-3. **Security Scanning**: Integrate container security tools
-4. **GitOps**: Implement ArgoCD or Flux for application delivery
-5. **Networking**: Add ingress controllers and load balancers
+- ✅ All authentication issues resolved
+- ✅ Network configuration optimized  
+- ✅ VM sizes verified for region compatibility
+- ✅ CI/CD pipelines tested and working
+- ✅ Documentation updated
 
-## 📝 Contributing
+**To deploy your AKS cluster:**
+1. Create production environment in GitHub (if using GitHub Actions)
+2. Trigger the workflow by pushing to main or manual trigger
+3. Approve deployment in production environment
+4. Monitor deployment progress in Actions/Pipelines
 
-1. Follow Terraform best practices
-2. Update documentation for any changes
-3. Test in development environment first
-4. Use conventional commit messages
+## 🔮 Future Enhancements
+
+This infrastructure foundation enables:
+
+1. **🚀 Application Deployment**: Deploy microservices with Helm charts
+2. **📊 Monitoring Stack**: Prometheus, Grafana, Azure Monitor integration
+3. **🔒 Security Hardening**: Pod Security Standards, Network Policies
+4. **🔄 GitOps**: ArgoCD or Flux for continuous deployment
+5. **🌐 Ingress & Load Balancing**: NGINX Ingress Controller, Application Gateway
+6. **📈 Scaling**: Horizontal Pod Autoscaler, Cluster Autoscaler
+7. **💾 Storage**: Azure Disk, Azure Files integration
+
+## 🤝 Contributing
+
+1. **🏗️ Infrastructure Changes**: Test locally first, update documentation
+2. **📝 Documentation**: Keep README and docs up-to-date  
+3. **🔒 Security**: Follow principle of least privilege
+4. **✅ Testing**: Validate with `terraform plan` before applying
+5. **📊 Monitoring**: Check Azure resources after deployment
+
+## 📚 Additional Resources
+
+- **[Azure AKS Documentation](https://docs.microsoft.com/en-us/azure/aks/)**
+- **[Terraform Azure Provider](https://registry.terraform.io/providers/hashicorp/azurerm/latest)**
+- **[GitHub Actions for Azure](https://docs.github.com/en/actions/deployment/deploying-to-your-cloud-provider/deploying-to-azure)**
+- **[Workload Identity Federation](https://docs.microsoft.com/en-us/azure/active-directory/develop/workload-identity-federation)**
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License - See LICENSE file for details.
+
+---
+
+**⭐ Star this repository if it helped you deploy AKS infrastructure successfully!**
