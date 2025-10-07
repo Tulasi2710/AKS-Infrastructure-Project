@@ -30,7 +30,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Install Terraform'
       inputs:
-        azureSubscription: 'azure-service-connection'
+        azureSubscription: 'azure-service-connection1'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         inlineScript: |
@@ -43,7 +43,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Terraform Format Check'
       inputs:
-        azureSubscription: 'azure-service-connection'
+        azureSubscription: 'azure-service-connection1'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         workingDirectory: '$(System.DefaultWorkingDirectory)/terraform'
@@ -53,7 +53,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Terraform Init'
       inputs:
-        azureSubscription: 'azure-service-connection'
+        azureSubscription: 'azure-service-connection1'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         workingDirectory: $(workingDirectory)
@@ -67,7 +67,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Terraform Validate'
       inputs:
-        azureSubscription: 'azure-service-connection'
+        azureSubscription: 'azure-service-connection1'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         workingDirectory: $(workingDirectory)
@@ -88,7 +88,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Install Terraform'
       inputs:
-        azureSubscription: 'azure-service-connection'
+        azureSubscription: 'azure-service-connection1'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         inlineScript: |
@@ -101,7 +101,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Terraform Init'
       inputs:
-        azureSubscription: 'azure-service-connection'
+        azureSubscription: 'azure-service-connection1'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         workingDirectory: $(workingDirectory)
@@ -115,7 +115,7 @@ stages:
     - task: AzureCLI@2
       displayName: 'Terraform Plan'
       inputs:
-        azureSubscription: 'azure-service-connection'
+        azureSubscription: 'azure-service-connection1'
         scriptType: 'bash'
         scriptLocation: 'inlineScript'
         workingDirectory: $(workingDirectory)
@@ -146,7 +146,7 @@ stages:
           - task: AzureCLI@2
             displayName: 'Install Terraform'
             inputs:
-              azureSubscription: 'azure-service-connection'
+              azureSubscription: 'azure-service-connection1'
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               inlineScript: |
@@ -165,7 +165,7 @@ stages:
           - task: AzureCLI@2
             displayName: 'Terraform Init'
             inputs:
-              azureSubscription: 'azure-service-connection'
+              azureSubscription: 'azure-service-connection1'
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               workingDirectory: $(workingDirectory)
@@ -179,7 +179,7 @@ stages:
           - task: AzureCLI@2
             displayName: 'Terraform Apply'
             inputs:
-              azureSubscription: 'azure-service-connection'
+              azureSubscription: 'azure-service-connection1'
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               workingDirectory: $(workingDirectory)
@@ -189,7 +189,7 @@ stages:
           - task: AzureCLI@2
             displayName: 'Terraform Output'
             inputs:
-              azureSubscription: 'azure-service-connection'
+              azureSubscription: 'azure-service-connection1'
               scriptType: 'bash'
               scriptLocation: 'inlineScript'
               workingDirectory: $(workingDirectory)
