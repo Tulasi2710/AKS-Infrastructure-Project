@@ -176,7 +176,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate-manifests
     if: github.ref == 'refs/heads/main'
-    environment: argocd-deployment
     
     steps:
     - name: Checkout
