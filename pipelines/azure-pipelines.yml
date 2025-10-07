@@ -11,8 +11,11 @@ trigger:
     - terraform/*
 
 variables:
-  terraformVersion: '1.6.0'
-  workingDirectory: '$(System.DefaultWorkingDirectory)/terraform/environments/dev'
+- group: terraform-backend
+- name: terraformVersion
+  value: '1.6.0'
+- name: workingDirectory
+  value: '$(System.DefaultWorkingDirectory)/terraform/environments/dev'
 
 stages:
 - stage: Validate
@@ -24,37 +27,52 @@ stages:
       vmImage: 'ubuntu-latest'
     
     steps:
-    - task: TerraformInstaller@0
+    - task: AzureCLI@2
       displayName: 'Install Terraform'
       inputs:
-        terraformVersion: $(terraformVersion)
+        azureSubscription: 'azure-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Install Terraform
+          wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+          sudo apt update && sudo apt install terraform
+          terraform version
     
-    - task: TerraformTaskV4@4
+    - task: AzureCLI@2
       displayName: 'Terraform Format Check'
       inputs:
-        provider: 'azurerm'
-        command: 'fmt'
-        commandOptions: '-check -recursive'
+        azureSubscription: 'azure-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
         workingDirectory: '$(System.DefaultWorkingDirectory)/terraform'
+        inlineScript: |
+          terraform fmt -check -recursive
     
-    - task: TerraformTaskV4@4
+    - task: AzureCLI@2
       displayName: 'Terraform Init'
       inputs:
-        provider: 'azurerm'
-        command: 'init'
-        backendServiceArm: 'azure-service-connection'
-        backendAzureRmResourceGroupName: '$(terraformStateResourceGroup)'
-        backendAzureRmStorageAccountName: '$(terraformStateStorageAccount)'
-        backendAzureRmContainerName: 'tfstate'
-        backendAzureRmKey: 'dev.terraform.tfstate'
+        azureSubscription: 'azure-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
         workingDirectory: $(workingDirectory)
+        inlineScript: |
+          terraform init \
+            -backend-config="resource_group_name=$(terraformStateResourceGroup)" \
+            -backend-config="storage_account_name=$(terraformStateStorageAccount)" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=dev.terraform.tfstate"
     
-    - task: TerraformTaskV4@4
+    - task: AzureCLI@2
       displayName: 'Terraform Validate'
       inputs:
-        provider: 'azurerm'
-        command: 'validate'
+        azureSubscription: 'azure-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
         workingDirectory: $(workingDirectory)
+        inlineScript: |
+          terraform validate
 
 - stage: Plan
   displayName: 'Terraform Plan'
@@ -67,31 +85,42 @@ stages:
       vmImage: 'ubuntu-latest'
     
     steps:
-    - task: TerraformInstaller@0
+    - task: AzureCLI@2
       displayName: 'Install Terraform'
       inputs:
-        terraformVersion: $(terraformVersion)
+        azureSubscription: 'azure-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Install Terraform
+          wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+          sudo apt update && sudo apt install terraform
+          terraform version
     
-    - task: TerraformTaskV4@4
+    - task: AzureCLI@2
       displayName: 'Terraform Init'
       inputs:
-        provider: 'azurerm'
-        command: 'init'
-        backendServiceArm: 'azure-service-connection'
-        backendAzureRmResourceGroupName: '$(terraformStateResourceGroup)'
-        backendAzureRmStorageAccountName: '$(terraformStateStorageAccount)'
-        backendAzureRmContainerName: 'tfstate'
-        backendAzureRmKey: 'dev.terraform.tfstate'
+        azureSubscription: 'azure-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
         workingDirectory: $(workingDirectory)
+        inlineScript: |
+          terraform init \
+            -backend-config="resource_group_name=$(terraformStateResourceGroup)" \
+            -backend-config="storage_account_name=$(terraformStateStorageAccount)" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=dev.terraform.tfstate"
     
-    - task: TerraformTaskV4@4
+    - task: AzureCLI@2
       displayName: 'Terraform Plan'
       inputs:
-        provider: 'azurerm'
-        command: 'plan'
-        commandOptions: '-var-file="terraform.tfvars" -out=tfplan'
-        environmentServiceNameAzureRM: 'azure-service-connection'
+        azureSubscription: 'azure-service-connection'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
         workingDirectory: $(workingDirectory)
+        inlineScript: |
+          terraform plan -var-file="terraform.tfvars" -out=tfplan
     
     - task: PublishPipelineArtifact@1
       displayName: 'Publish Terraform Plan'
@@ -114,10 +143,18 @@ stages:
       runOnce:
         deploy:
           steps:
-          - task: TerraformInstaller@0
+          - task: AzureCLI@2
             displayName: 'Install Terraform'
             inputs:
-              terraformVersion: $(terraformVersion)
+              azureSubscription: 'azure-service-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                # Install Terraform
+                wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+                echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+                sudo apt update && sudo apt install terraform
+                terraform version
           
           - task: DownloadPipelineArtifact@2
             displayName: 'Download Terraform Plan'
@@ -125,26 +162,29 @@ stages:
               artifact: 'terraform-plan'
               path: $(workingDirectory)
           
-          - task: TerraformTaskV4@4
+          - task: AzureCLI@2
             displayName: 'Terraform Init'
             inputs:
-              provider: 'azurerm'
-              command: 'init'
-              backendServiceArm: 'azure-service-connection'
-              backendAzureRmResourceGroupName: '$(terraformStateResourceGroup)'
-              backendAzureRmStorageAccountName: '$(terraformStateStorageAccount)'
-              backendAzureRmContainerName: 'tfstate'
-              backendAzureRmKey: 'dev.terraform.tfstate'
+              azureSubscription: 'azure-service-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
               workingDirectory: $(workingDirectory)
+              inlineScript: |
+                terraform init \
+                  -backend-config="resource_group_name=$(terraformStateResourceGroup)" \
+                  -backend-config="storage_account_name=$(terraformStateStorageAccount)" \
+                  -backend-config="container_name=tfstate" \
+                  -backend-config="key=dev.terraform.tfstate"
           
-          - task: TerraformTaskV4@4
+          - task: AzureCLI@2
             displayName: 'Terraform Apply'
             inputs:
-              provider: 'azurerm'
-              command: 'apply'
-              commandOptions: 'tfplan'
-              environmentServiceNameAzureRM: 'azure-service-connection'
+              azureSubscription: 'azure-service-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
               workingDirectory: $(workingDirectory)
+              inlineScript: |
+                terraform apply -auto-approve tfplan
           
           - task: TerraformTaskV4@4
             displayName: 'Terraform Output'
