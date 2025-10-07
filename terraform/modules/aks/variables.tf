@@ -27,7 +27,7 @@ variable "node_count" {
 variable "node_vm_size" {
   description = "VM size for the default node pool"
   type        = string
-  default     = "Standard_D2s_v3"
+  default     = "Standard_D2s_v6"
 }
 
 variable "subnet_id" {
