@@ -1,0 +1,13 @@
+# Example Terraform Variables for Development Environment
+# Copy this file to terraform.tfvars and customize the values
+
+# Azure region where resources will be deployed
+location = "East US"
+
+# Virtual network configuration
+vnet_address_space = ["10.0.0.0/16"]
+aks_subnet_cidr    = "10.0.1.0/24"
+
+# AKS cluster configuration
+node_count   = 2
+node_vm_size = "Standard_D2s_v3"

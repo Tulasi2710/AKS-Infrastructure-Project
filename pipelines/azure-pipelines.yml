@@ -1,0 +1,154 @@
+# Azure DevOps Pipeline for AKS Infrastructure Deployment
+# This pipeline deploys Terraform infrastructure to Azure
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+  paths:
+    include:
+    - terraform/*
+
+variables:
+  terraformVersion: '1.6.0'
+  workingDirectory: '$(System.DefaultWorkingDirectory)/terraform/environments/dev'
+
+stages:
+- stage: Validate
+  displayName: 'Terraform Validate'
+  jobs:
+  - job: TerraformValidate
+    displayName: 'Validate Terraform Configuration'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: TerraformInstaller@0
+      displayName: 'Install Terraform'
+      inputs:
+        terraformVersion: $(terraformVersion)
+    
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Format Check'
+      inputs:
+        provider: 'azurerm'
+        command: 'fmt'
+        commandOptions: '-check -recursive'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/terraform'
+    
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Init'
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        backendServiceArm: 'azure-service-connection'
+        backendAzureRmResourceGroupName: '$(terraformStateResourceGroup)'
+        backendAzureRmStorageAccountName: '$(terraformStateStorageAccount)'
+        backendAzureRmContainerName: 'tfstate'
+        backendAzureRmKey: 'dev.terraform.tfstate'
+        workingDirectory: $(workingDirectory)
+    
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Validate'
+      inputs:
+        provider: 'azurerm'
+        command: 'validate'
+        workingDirectory: $(workingDirectory)
+
+- stage: Plan
+  displayName: 'Terraform Plan'
+  dependsOn: Validate
+  condition: succeeded()
+  jobs:
+  - job: TerraformPlan
+    displayName: 'Plan Infrastructure Changes'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: TerraformInstaller@0
+      displayName: 'Install Terraform'
+      inputs:
+        terraformVersion: $(terraformVersion)
+    
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Init'
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        backendServiceArm: 'azure-service-connection'
+        backendAzureRmResourceGroupName: '$(terraformStateResourceGroup)'
+        backendAzureRmStorageAccountName: '$(terraformStateStorageAccount)'
+        backendAzureRmContainerName: 'tfstate'
+        backendAzureRmKey: 'dev.terraform.tfstate'
+        workingDirectory: $(workingDirectory)
+    
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Plan'
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+        commandOptions: '-var-file="terraform.tfvars" -out=tfplan'
+        environmentServiceNameAzureRM: 'azure-service-connection'
+        workingDirectory: $(workingDirectory)
+    
+    - task: PublishPipelineArtifact@1
+      displayName: 'Publish Terraform Plan'
+      inputs:
+        targetPath: '$(workingDirectory)/tfplan'
+        artifact: 'terraform-plan'
+
+- stage: Apply
+  displayName: 'Terraform Apply'
+  dependsOn: Plan
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - deployment: TerraformApply
+    displayName: 'Deploy Infrastructure'
+    environment: 'dev-infrastructure'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: TerraformInstaller@0
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: $(terraformVersion)
+          
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download Terraform Plan'
+            inputs:
+              artifact: 'terraform-plan'
+              path: $(workingDirectory)
+          
+          - task: TerraformTaskV4@4
+            displayName: 'Terraform Init'
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              backendServiceArm: 'azure-service-connection'
+              backendAzureRmResourceGroupName: '$(terraformStateResourceGroup)'
+              backendAzureRmStorageAccountName: '$(terraformStateStorageAccount)'
+              backendAzureRmContainerName: 'tfstate'
+              backendAzureRmKey: 'dev.terraform.tfstate'
+              workingDirectory: $(workingDirectory)
+          
+          - task: TerraformTaskV4@4
+            displayName: 'Terraform Apply'
+            inputs:
+              provider: 'azurerm'
+              command: 'apply'
+              commandOptions: 'tfplan'
+              environmentServiceNameAzureRM: 'azure-service-connection'
+              workingDirectory: $(workingDirectory)
+          
+          - task: TerraformTaskV4@4
+            displayName: 'Terraform Output'
+            inputs:
+              provider: 'azurerm'
+              command: 'output'
+              workingDirectory: $(workingDirectory)
