@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ecommerce
+  labels:
+    name: ecommerce
+    environment: dev
+    project: aks-microservices
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ecommerce-database
+  labels:
+    name: ecommerce-database
+    environment: dev
+    project: aks-microservices
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    name: monitoring
+    environment: dev
+    project: aks-microservices

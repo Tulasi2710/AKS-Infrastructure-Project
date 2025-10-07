@@ -1,0 +1,310 @@
+# Azure DevOps Pipeline for Microservices Deployment Only
+# This pipeline deploys microservices to an existing AKS cluster
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+  paths:
+    include:
+    - k8s/**
+    - scripts/deploy-microservices.*
+    - pipelines/microservices-pipeline.yml
+
+pr:
+  branches:
+    include:
+    - main
+  paths:
+    include:
+    - k8s/**
+    - scripts/deploy-microservices.*
+    - pipelines/microservices-pipeline.yml
+
+parameters:
+- name: aksClusterName
+  displayName: 'AKS Cluster Name'
+  type: string
+  default: 'aks-cluster-dev'
+- name: resourceGroupName
+  displayName: 'Resource Group Name'
+  type: string
+  default: 'rg-aks-dev'
+- name: forceRedeploy
+  displayName: 'Force Redeploy All Services'
+  type: boolean
+  default: false
+
+variables:
+- name: kubernetesDirectory
+  value: '$(System.DefaultWorkingDirectory)/k8s'
+- name: azureServiceConnection
+  value: 'azure-service-connection1'
+
+stages:
+- stage: ValidateManifests
+  displayName: 'Validate Kubernetes Manifests'
+  jobs:
+  - job: ValidateKubernetes
+    displayName: 'Validate YAML Files'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: KubectlInstaller@0
+      displayName: 'Install kubectl'
+      inputs:
+        kubectlVersion: 'v1.28.0'
+    
+    - script: |
+        echo "Validating Kubernetes manifests..."
+        find k8s/ -name "*.yaml" -o -name "*.yml" | while read file; do
+          echo "Validating $file..."
+          kubectl apply --dry-run=client -f "$file"
+        done
+      displayName: 'Validate YAML Syntax'
+    
+    - script: |
+        echo "Checking for required secrets in manifests..."
+        grep -r "secretKeyRef\|valueFrom" k8s/ || echo "No secret references found"
+      displayName: 'Check Secret References'
+    
+    - script: |
+        echo "Checking resource specifications..."
+        echo "Memory and CPU limits:"
+        grep -r "limits:\|requests:" k8s/ || echo "No resource limits found"
+      displayName: 'Validate Resource Specifications'
+
+- stage: DeployMicroservices
+  displayName: 'Deploy to AKS'
+  dependsOn: ValidateManifests
+  condition: succeeded()
+  jobs:
+  - deployment: DeployToAKS
+    displayName: 'Deploy Microservices'
+    environment: 'aks-microservices'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: AzureCLI@2
+            displayName: 'Connect to AKS Cluster'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                echo "Connecting to AKS cluster: ${{ parameters.aksClusterName }} in resource group: ${{ parameters.resourceGroupName }}"
+                az aks get-credentials --resource-group "${{ parameters.resourceGroupName }}" --name "${{ parameters.aksClusterName }}" --overwrite-existing
+                
+                # Verify cluster connection
+                echo "Verifying cluster connectivity..."
+                kubectl cluster-info
+                kubectl get nodes
+                kubectl version --client --output=yaml
+          
+          - task: KubectlInstaller@0
+            displayName: 'Install kubectl'
+            inputs:
+              kubectlVersion: 'v1.28.0'
+          
+          - task: PowerShell@2
+            displayName: 'Check Current Cluster State'
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "=== CURRENT CLUSTER STATE ===" -ForegroundColor Cyan
+                Write-Host "Namespaces:" -ForegroundColor Yellow
+                kubectl get namespaces | Select-String "ecommerce|monitoring" -ErrorAction SilentlyContinue | Out-String -Stream | ForEach-Object { if ($_.Trim()) { Write-Host $_ } }
+                
+                Write-Host "`nExisting pods:" -ForegroundColor Yellow
+                kubectl get pods --all-namespaces | Select-String "ecommerce|monitoring" -ErrorAction SilentlyContinue | Out-String -Stream | ForEach-Object { if ($_.Trim()) { Write-Host $_ } }
+          
+          - task: Kubernetes@1
+            displayName: '📁 Deploy Namespaces'
+            inputs:
+              connectionType: 'None'
+              command: 'apply'
+              arguments: '-f $(kubernetesDirectory)/namespaces/ecommerce-namespace.yaml'
+          
+          - script: |
+              echo "Waiting for namespaces to be active..."
+              kubectl wait --for=condition=Active namespace/ecommerce --timeout=60s
+              kubectl wait --for=condition=Active namespace/ecommerce-database --timeout=60s
+              kubectl wait --for=condition=Active namespace/monitoring --timeout=60s
+              echo "✅ All namespaces are active"
+            displayName: 'Wait for Namespaces Ready'
+          
+          - task: Kubernetes@1
+            displayName: '🗄️ Deploy PostgreSQL Database'
+            inputs:
+              connectionType: 'None'
+              command: 'apply'
+              arguments: '-f $(kubernetesDirectory)/database/postgres-deployment.yaml'
+          
+          - script: |
+              echo "Waiting for database to be ready..."
+              kubectl wait --for=condition=available --timeout=300s deployment/postgres -n ecommerce-database
+              echo "✅ Database is ready"
+              echo "Database status:"
+              kubectl get pods -n ecommerce-database
+              kubectl get svc -n ecommerce-database
+            displayName: 'Wait for Database Ready'
+          
+          - task: Kubernetes@1
+            displayName: '🔧 Deploy Backend Services'
+            inputs:
+              connectionType: 'None'
+              command: 'apply'
+              arguments: '-f $(kubernetesDirectory)/backend/backend-services.yaml'
+          
+          - script: |
+              echo "Waiting for backend services to be ready..."
+              kubectl wait --for=condition=available --timeout=300s deployment/user-service -n ecommerce
+              kubectl wait --for=condition=available --timeout=300s deployment/product-service -n ecommerce
+              echo "✅ Backend services are ready"
+              echo "Backend services status:"
+              kubectl get pods -n ecommerce
+              kubectl get svc -n ecommerce
+            displayName: 'Wait for Backend Services Ready'
+          
+          - task: Kubernetes@1
+            displayName: '🌐 Deploy Frontend Service'
+            inputs:
+              connectionType: 'None'
+              command: 'apply'
+              arguments: '-f $(kubernetesDirectory)/frontend/frontend-deployment.yaml'
+          
+          - script: |
+              echo "Waiting for frontend to be ready..."
+              kubectl wait --for=condition=available --timeout=300s deployment/frontend -n ecommerce
+              echo "✅ Frontend is ready"
+              echo "Frontend status:"
+              kubectl get pods -n ecommerce -l app=frontend
+              kubectl get svc -n ecommerce -l app=frontend
+            displayName: 'Wait for Frontend Ready'
+          
+          - task: Kubernetes@1
+            displayName: '🔀 Deploy Ingress Controller'
+            inputs:
+              connectionType: 'None'
+              command: 'apply'
+              arguments: '-f $(kubernetesDirectory)/ingress/ingress-config.yaml'
+          
+          - script: |
+              echo "Ingress deployment status:"
+              kubectl get ingress -n ecommerce
+              kubectl get svc -n ecommerce ecommerce-loadbalancer
+            displayName: 'Check Ingress Status'
+          
+          - task: Kubernetes@1
+            displayName: '📊 Deploy Monitoring Stack'
+            inputs:
+              connectionType: 'None'
+              command: 'apply'
+              arguments: '-f $(kubernetesDirectory)/monitoring/monitoring-stack.yaml'
+          
+          - script: |
+              echo "Waiting for monitoring services to be ready..."
+              kubectl wait --for=condition=available --timeout=300s deployment/prometheus -n monitoring
+              kubectl wait --for=condition=available --timeout=300s deployment/grafana -n monitoring
+              echo "✅ Monitoring stack is ready"
+              echo "Monitoring stack status:"
+              kubectl get pods -n monitoring
+              kubectl get svc -n monitoring
+            displayName: 'Wait for Monitoring Stack Ready'
+          
+          - task: PowerShell@2
+            displayName: '🎉 Final Deployment Summary'
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "==================================" -ForegroundColor Green
+                Write-Host "🎉 MICROSERVICES DEPLOYMENT COMPLETE" -ForegroundColor Green -BackgroundColor DarkGreen
+                Write-Host "==================================" -ForegroundColor Green
+                Write-Host ""
+                
+                Write-Host "📊 PODS STATUS:" -ForegroundColor Cyan
+                Write-Host "---------------" -ForegroundColor Cyan
+                Write-Host "E-commerce Pods:" -ForegroundColor Yellow
+                kubectl get pods -n ecommerce -o wide
+                Write-Host "`nDatabase Pods:" -ForegroundColor Yellow
+                kubectl get pods -n ecommerce-database -o wide
+                Write-Host "`nMonitoring Pods:" -ForegroundColor Yellow
+                kubectl get pods -n monitoring -o wide
+                Write-Host ""
+                
+                Write-Host "🌐 SERVICES:" -ForegroundColor Cyan
+                Write-Host "------------" -ForegroundColor Cyan
+                Write-Host "E-commerce Services:" -ForegroundColor Yellow
+                kubectl get svc -n ecommerce
+                Write-Host "`nDatabase Services:" -ForegroundColor Yellow
+                kubectl get svc -n ecommerce-database
+                Write-Host "`nMonitoring Services:" -ForegroundColor Yellow
+                kubectl get svc -n monitoring
+                Write-Host ""
+                
+                Write-Host "🔀 INGRESS:" -ForegroundColor Cyan
+                Write-Host "----------" -ForegroundColor Cyan
+                kubectl get ingress -n ecommerce
+                Write-Host ""
+                
+                Write-Host "📈 ACCESS INFORMATION:" -ForegroundColor Yellow
+                Write-Host "---------------------" -ForegroundColor Yellow
+                
+                # Get LoadBalancer IPs (may be pending)
+                $frontendIP = (kubectl get svc ecommerce-loadbalancer -n ecommerce -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>$null)
+                $grafanaIP = (kubectl get svc grafana-service -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>$null)
+                
+                Write-Host "Frontend Application:" -ForegroundColor Green
+                if ($frontendIP -and $frontendIP -ne "") {
+                  Write-Host "  URL: http://$frontendIP" -ForegroundColor White
+                  Write-Host "  API Endpoints:" -ForegroundColor White
+                  Write-Host "    - User Service: http://$frontendIP/api/users" -ForegroundColor Gray
+                  Write-Host "    - Product Service: http://$frontendIP/api/products" -ForegroundColor Gray
+                } else {
+                  Write-Host "  LoadBalancer IP: Pending (check later)" -ForegroundColor Yellow
+                  Write-Host "  Command: kubectl get svc ecommerce-loadbalancer -n ecommerce" -ForegroundColor Gray
+                }
+                
+                Write-Host "`nGrafana Dashboard:" -ForegroundColor Green
+                if ($grafanaIP -and $grafanaIP -ne "") {
+                  Write-Host "  URL: http://$grafanaIP:3000" -ForegroundColor White
+                  Write-Host "  Username: admin" -ForegroundColor White
+                  Write-Host "  Password: admin123" -ForegroundColor White
+                } else {
+                  Write-Host "  LoadBalancer IP: Pending (check later)" -ForegroundColor Yellow
+                  Write-Host "  Command: kubectl get svc grafana-service -n monitoring" -ForegroundColor Gray
+                }
+                
+                Write-Host "`n🔍 MONITORING COMMANDS:" -ForegroundColor Cyan
+                Write-Host "----------------------" -ForegroundColor Cyan
+                Write-Host "kubectl get pods --all-namespaces" -ForegroundColor Gray
+                Write-Host "kubectl get svc --all-namespaces" -ForegroundColor Gray
+                Write-Host "kubectl logs -f deployment/<deployment-name> -n <namespace>" -ForegroundColor Gray
+          
+          - task: PowerShell@2
+            displayName: '🩺 Health Check'
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "Performing final health checks..." -ForegroundColor Cyan
+                
+                # Check if all pods are running
+                $failedPods = (kubectl get pods --all-namespaces --field-selector=status.phase!=Running --no-headers 2>$null | Measure-Object).Count
+                if ($failedPods -gt 0) {
+                  Write-Host "⚠️ Warning: $failedPods pods are not in Running state" -ForegroundColor Yellow
+                  kubectl get pods --all-namespaces --field-selector=status.phase!=Running
+                } else {
+                  Write-Host "✅ All pods are running successfully" -ForegroundColor Green
+                }
+                
+                # Check service endpoints
+                Write-Host "`nChecking service endpoints..." -ForegroundColor Cyan
+                kubectl get endpoints --all-namespaces
+                
+                Write-Host "`n🎯 Deployment completed successfully!" -ForegroundColor Green
