@@ -1,0 +1,47 @@
+# Terraform files# Terraform files
+
+.terraform/.terraform/
+
+.terraform.lock.hcl.terraform.lock.hcl
+
+terraform.tfstateterraform.tfstate
+
+terraform.tfstate.backupterraform.tfstate.backup
+
+*.tfplan*.tfplan
+
+*.tfstate.**.tfstate.*
+
+
+
+# OS files# OS files
+
+.DS_Store.DS_Store
+
+Thumbs.dbThumbs.db
+
+
+
+# IDE files# IDE files
+
+.vscode/.vscode/
+
+.idea/.idea/
+
+*.swp*.swp
+
+*.swo*.swo
+
+
+
+# Logs# Logs
+
+*.log*.log
+
+
+
+# Environment files# Environment files
+
+.env.env
+
+.env.local.env.local
