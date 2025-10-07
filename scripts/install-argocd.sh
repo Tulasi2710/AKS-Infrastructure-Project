@@ -36,7 +36,14 @@ kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/st
 echo "⏳ Waiting for ArgoCD components to be ready..."
 kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
 kubectl wait --for=condition=available --timeout=300s deployment/argocd-repo-server -n argocd
-kubectl wait --for=condition=available --timeout=300s deployment/argocd-application-controller -n argocd
+kubectl wait --for=condition=available --timeout=300s deployment/argocd-dex-server -n argocd
+kubectl wait --for=condition=available --timeout=300s deployment/argocd-redis -n argocd
+kubectl wait --for=condition=available --timeout=300s deployment/argocd-notifications-controller -n argocd
+kubectl wait --for=condition=available --timeout=300s deployment/argocd-applicationset-controller -n argocd
+
+# Wait for StatefulSet (argocd-application-controller is a StatefulSet, not a Deployment)
+echo "⏳ Waiting for ArgoCD StatefulSet to be ready..."
+kubectl wait --for=condition=Ready --timeout=300s statefulset/argocd-application-controller -n argocd
 
 # Apply LoadBalancer service for external access
 echo "🌐 Configuring external access via LoadBalancer..."

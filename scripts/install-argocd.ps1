@@ -50,16 +50,25 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Wait for ArgoCD components to be ready
-Write-Host "⏳ Waiting for ArgoCD components to be ready..." -ForegroundColor Yellow
+Write-Host "⏳ Waiting for ArgoCD deployments to be ready..." -ForegroundColor Yellow
 
-$deployments = @("argocd-server", "argocd-repo-server", "argocd-application-controller")
+$deployments = @("argocd-server", "argocd-repo-server", "argocd-dex-server", "argocd-redis", "argocd-notifications-controller", "argocd-applicationset-controller")
 foreach ($deployment in $deployments) {
-    Write-Host "  Waiting for $deployment..." -ForegroundColor Gray
+    Write-Host "  Waiting for deployment/$deployment..." -ForegroundColor Gray
     kubectl wait --for=condition=available --timeout=300s deployment/$deployment -n argocd
     if ($LASTEXITCODE -ne 0) {
         Write-Host "❌ Failed to wait for $deployment to be ready" -ForegroundColor Red
         exit 1
     }
+}
+
+# Wait for StatefulSet (argocd-application-controller is a StatefulSet, not a Deployment)
+Write-Host "⏳ Waiting for ArgoCD StatefulSet to be ready..." -ForegroundColor Yellow
+Write-Host "  Waiting for statefulset/argocd-application-controller..." -ForegroundColor Gray
+kubectl wait --for=condition=Ready --timeout=300s statefulset/argocd-application-controller -n argocd
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Failed to wait for argocd-application-controller StatefulSet to be ready" -ForegroundColor Red
+    exit 1
 }
 
 Write-Host "✅ All ArgoCD components are ready" -ForegroundColor Green
