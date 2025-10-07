@@ -1,0 +1,283 @@
+name: 'Deploy Microservices to AKS'
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'k8s/**'
+      - 'scripts/deploy-microservices.*'
+      - '.github/workflows/deploy-k8s.yml'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'k8s/**'
+      - 'scripts/deploy-microservices.*'
+      - '.github/workflows/deploy-k8s.yml'
+  workflow_dispatch:
+    inputs:
+      aks_cluster_name:
+        description: 'AKS Cluster Name'
+        required: true
+        default: 'aks-cluster-dev'
+        type: string
+      resource_group_name:
+        description: 'Resource Group Name'
+        required: true
+        default: 'rg-aks-dev'
+        type: string
+      namespace_action:
+        description: 'Namespace Action'
+        required: false
+        default: 'apply'
+        type: choice
+        options:
+        - apply
+        - delete-and-recreate
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  KUBECTL_VERSION: 'v1.28.0'
+
+jobs:
+  validate-k8s:
+    name: 'Validate Kubernetes Manifests'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: ${{ env.KUBECTL_VERSION }}
+
+    - name: Validate YAML Syntax
+      run: |
+        echo "🔍 Validating Kubernetes manifests..."
+        find k8s/ -name "*.yaml" -o -name "*.yml" | while read file; do
+          echo "  ✓ Validating $file"
+          kubectl apply --dry-run=client -f "$file" || exit 1
+        done
+        echo "✅ All manifests are valid"
+
+    - name: Check Resource Requirements
+      run: |
+        echo "📊 Checking resource requirements..."
+        echo "Memory and CPU limits found in:"
+        grep -r "limits:\|requests:" k8s/ | cut -d: -f1 | sort -u || echo "No resource limits specified"
+        
+        echo ""
+        echo "Secret references found in:"
+        grep -r "secretKeyRef\|valueFrom:" k8s/ | cut -d: -f1 | sort -u || echo "No secret references found"
+
+  deploy-to-aks:
+    name: 'Deploy to AKS Cluster'
+    runs-on: ubuntu-latest
+    needs: validate-k8s
+    if: github.ref == 'refs/heads/main'
+    environment: microservices-deployment
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: ${{ env.KUBECTL_VERSION }}
+
+    - name: Connect to AKS Cluster
+      run: |
+        CLUSTER_NAME="${{ github.event.inputs.aks_cluster_name || 'aks-cluster-dev' }}"
+        RG_NAME="${{ github.event.inputs.resource_group_name || 'rg-aks-dev' }}"
+        
+        echo "🔗 Connecting to AKS cluster: $CLUSTER_NAME in resource group: $RG_NAME"
+        az aks get-credentials --resource-group "$RG_NAME" --name "$CLUSTER_NAME" --overwrite-existing
+        
+        echo "✅ Connected to cluster"
+        kubectl cluster-info
+        kubectl get nodes
+
+    - name: Check Current State
+      run: |
+        echo "📋 Current cluster state:"
+        echo "Namespaces:"
+        kubectl get namespaces | grep -E "(ecommerce|monitoring)" || echo "  No application namespaces found"
+        
+        echo ""
+        echo "Existing application pods:"
+        kubectl get pods --all-namespaces | grep -E "(ecommerce|monitoring)" || echo "  No application pods found"
+
+    - name: Deploy Namespaces
+      run: |
+        echo "📁 Deploying namespaces..."
+        kubectl apply -f k8s/namespaces/ecommerce-namespace.yaml
+        
+        echo "⏳ Waiting for namespaces to be ready..."
+        kubectl wait --for=condition=Active --timeout=60s namespace/ecommerce
+        kubectl wait --for=condition=Active --timeout=60s namespace/ecommerce-database  
+        kubectl wait --for=condition=Active --timeout=60s namespace/monitoring
+        echo "✅ All namespaces are active"
+
+    - name: Deploy Database
+      run: |
+        echo "🗄️ Deploying PostgreSQL database..."
+        kubectl apply -f k8s/database/postgres-deployment.yaml
+        
+        echo "⏳ Waiting for database to be ready..."
+        kubectl wait --for=condition=available --timeout=300s deployment/postgres -n ecommerce-database
+        
+        echo "✅ Database is ready"
+        kubectl get pods -n ecommerce-database
+        kubectl get svc -n ecommerce-database
+
+    - name: Deploy Backend Services
+      run: |
+        echo "🔧 Deploying backend services..."
+        kubectl apply -f k8s/backend/backend-services.yaml
+        
+        echo "⏳ Waiting for backend services to be ready..."
+        kubectl wait --for=condition=available --timeout=300s deployment/user-service -n ecommerce
+        kubectl wait --for=condition=available --timeout=300s deployment/product-service -n ecommerce
+        
+        echo "✅ Backend services are ready"
+        kubectl get pods -n ecommerce -l 'app in (user-service,product-service)'
+        kubectl get svc -n ecommerce -l 'app in (user-service,product-service)'
+
+    - name: Deploy Frontend
+      run: |
+        echo "🌐 Deploying frontend..."
+        kubectl apply -f k8s/frontend/frontend-deployment.yaml
+        
+        echo "⏳ Waiting for frontend to be ready..."
+        kubectl wait --for=condition=available --timeout=300s deployment/frontend -n ecommerce
+        
+        echo "✅ Frontend is ready"
+        kubectl get pods -n ecommerce -l app=frontend
+        kubectl get svc -n ecommerce -l app=frontend
+
+    - name: Deploy Ingress
+      run: |
+        echo "🔀 Deploying ingress..."
+        kubectl apply -f k8s/ingress/ingress-config.yaml
+        
+        echo "✅ Ingress deployed"
+        kubectl get ingress -n ecommerce
+        kubectl get svc -n ecommerce ecommerce-loadbalancer
+
+    - name: Deploy Monitoring
+      run: |
+        echo "📊 Deploying monitoring stack..."
+        kubectl apply -f k8s/monitoring/monitoring-stack.yaml
+        
+        echo "⏳ Waiting for monitoring to be ready..."
+        kubectl wait --for=condition=available --timeout=300s deployment/prometheus -n monitoring
+        kubectl wait --for=condition=available --timeout=300s deployment/grafana -n monitoring
+        
+        echo "✅ Monitoring stack is ready"
+        kubectl get pods -n monitoring
+        kubectl get svc -n monitoring
+
+    - name: Deployment Summary
+      run: |
+        echo ""
+        echo "🎉 =================================="
+        echo "   MICROSERVICES DEPLOYMENT COMPLETE"  
+        echo "   =================================="
+        echo ""
+        
+        echo "📊 PODS STATUS:"
+        echo "---------------"
+        echo "E-commerce Pods:"
+        kubectl get pods -n ecommerce -o wide
+        echo ""
+        echo "Database Pods:"
+        kubectl get pods -n ecommerce-database -o wide
+        echo ""
+        echo "Monitoring Pods:"
+        kubectl get pods -n monitoring -o wide
+        echo ""
+        
+        echo "🌐 SERVICES:"
+        echo "------------"
+        kubectl get svc --all-namespaces | grep -E "(ecommerce|monitoring)"
+        echo ""
+        
+        echo "🔀 INGRESS:"
+        echo "-----------"
+        kubectl get ingress -n ecommerce
+        echo ""
+
+    - name: Get Access Information
+      run: |
+        echo "📱 ACCESS INFORMATION:"
+        echo "====================="
+        
+        # Wait a bit for LoadBalancer IPs
+        echo "⏳ Checking for LoadBalancer IPs..."
+        sleep 30
+        
+        FRONTEND_IP=$(kubectl get svc ecommerce-loadbalancer -n ecommerce -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+        GRAFANA_IP=$(kubectl get svc grafana-service -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+        
+        echo ""
+        echo "🌐 Frontend Application:"
+        if [ ! -z "$FRONTEND_IP" ]; then
+          echo "   URL: http://$FRONTEND_IP"
+          echo "   User API: http://$FRONTEND_IP/api/users"
+          echo "   Product API: http://$FRONTEND_IP/api/products"
+        else
+          echo "   LoadBalancer IP: Pending"
+          echo "   Check status: kubectl get svc ecommerce-loadbalancer -n ecommerce"
+        fi
+        
+        echo ""
+        echo "📊 Grafana Dashboard:"
+        if [ ! -z "$GRAFANA_IP" ]; then
+          echo "   URL: http://$GRAFANA_IP:3000"
+          echo "   Username: admin"
+          echo "   Password: admin123"
+        else
+          echo "   LoadBalancer IP: Pending"
+          echo "   Check status: kubectl get svc grafana-service -n monitoring"
+        fi
+        
+        echo ""
+        echo "🔍 Monitoring Commands:"
+        echo "   kubectl get pods --all-namespaces"
+        echo "   kubectl get svc --all-namespaces"
+        echo "   kubectl logs -f deployment/<name> -n <namespace>"
+
+    - name: Health Check
+      run: |
+        echo ""
+        echo "🩺 FINAL HEALTH CHECK:"
+        echo "====================="
+        
+        # Check for failed pods
+        FAILED_PODS=$(kubectl get pods --all-namespaces --field-selector=status.phase!=Running --no-headers 2>/dev/null | wc -l)
+        if [ "$FAILED_PODS" -gt 0 ]; then
+          echo "⚠️  Warning: $FAILED_PODS pods are not running"
+          kubectl get pods --all-namespaces --field-selector=status.phase!=Running
+        else
+          echo "✅ All pods are running successfully"
+        fi
+        
+        # Check service endpoints
+        echo ""
+        echo "Service endpoints:"
+        kubectl get endpoints --all-namespaces | grep -E "(ecommerce|monitoring)" || echo "No endpoints found"
+        
+        echo ""
+        echo "🚀 Deployment completed successfully!"

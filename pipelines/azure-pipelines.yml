@@ -1,5 +1,5 @@
-# Azure DevOps Pipeline for Complete AKS Infrastructure and Microservices Deployment
-# This pipeline deploys Terraform infrastructure and microservices to Azure AKS
+# Azure DevOps Pipeline for AKS Infrastructure Deployment
+# This pipeline deploys Terraform infrastructure to Azure
 
 trigger:
   branches:
@@ -9,32 +9,7 @@ trigger:
   paths:
     include:
     - terraform/**
-    - k8s/**
     - pipelines/azure-pipelines.yml
-
-pr:
-  branches:
-    include:
-    - main
-  paths:
-    include:
-    - terraform/**
-    - k8s/**
-    - pipelines/azure-pipelines.yml
-
-parameters:
-- name: deployInfrastructure
-  displayName: 'Deploy Terraform Infrastructure'
-  type: boolean
-  default: true
-- name: deployMicroservices
-  displayName: 'Deploy Microservices to AKS'
-  type: boolean
-  default: true
-- name: destroyInfrastructure
-  displayName: 'Destroy Infrastructure (DANGER)'
-  type: boolean
-  default: false
 
 variables:
 - group: terraform-backend
@@ -42,50 +17,13 @@ variables:
   value: '1.6.0'
 - name: workingDirectory
   value: '$(System.DefaultWorkingDirectory)/terraform/environments/dev'
-- name: kubernetesDirectory
-  value: '$(System.DefaultWorkingDirectory)/k8s'
 # Service connection for Azure authentication
 - name: azureServiceConnection
   value: 'azure-service-connection1'
-- name: aksClusterName
-  value: ''
-- name: resourceGroupName
-  value: ''
 
 stages:
-# Kubernetes Manifests Validation Stage
-- stage: ValidateKubernetes
-  displayName: 'Validate Kubernetes Manifests'
-  condition: eq('${{ parameters.deployMicroservices }}', true)
-  jobs:
-  - job: ValidateManifests
-    displayName: 'Validate Kubernetes YAML Files'
-    pool:
-      vmImage: 'ubuntu-latest'
-    
-    steps:
-    - task: KubectlInstaller@0
-      displayName: 'Install kubectl'
-      inputs:
-        kubectlVersion: 'v1.28.0'
-    
-    - script: |
-        echo "Validating Kubernetes manifests..."
-        find k8s/ -name "*.yaml" -o -name "*.yml" | while read file; do
-          echo "Validating $file..."
-          kubectl apply --dry-run=client -f "$file"
-        done
-      displayName: 'Validate YAML Syntax'
-    
-    - script: |
-        echo "Checking for required secrets in manifests..."
-        grep -r "secretKeyRef\|valueFrom" k8s/ || echo "No secret references found"
-      displayName: 'Check Secret References'
-
-# Terraform Validation Stage
-- stage: ValidateTerraform
+- stage: Validate
   displayName: 'Terraform Validate'
-  condition: eq('${{ parameters.deployInfrastructure }}', true)
   jobs:
   - job: TerraformValidate
     displayName: 'Validate Terraform Configuration'
@@ -97,14 +35,6 @@ stages:
       displayName: 'Install Terraform'
       inputs:
         terraformVersion: '$(terraformVersion)'
-    
-    - task: TerraformTaskV4@4
-      displayName: 'Terraform Format Check'
-      inputs:
-        provider: 'azurerm'
-        command: 'fmt'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/terraform'
-        commandOptions: '-check -recursive'
     
     - task: TerraformTaskV4@4
       displayName: 'Terraform Init'
@@ -125,10 +55,10 @@ stages:
         command: 'validate'
         workingDirectory: '$(workingDirectory)'
 
-- stage: PlanTerraform
+- stage: Plan
   displayName: 'Terraform Plan'
-  dependsOn: ValidateTerraform
-  condition: and(succeeded(), eq('${{ parameters.deployInfrastructure }}', true), ne('${{ parameters.destroyInfrastructure }}', true))
+  dependsOn: Validate
+  condition: succeeded()
   jobs:
   - job: TerraformPlan
     displayName: 'Plan Infrastructure Changes'
@@ -168,11 +98,10 @@ stages:
         targetPath: '$(workingDirectory)/tfplan'
         artifact: 'terraform-plan'
 
-# Terraform Apply Stage
-- stage: ApplyTerraform
+- stage: Apply
   displayName: 'Terraform Apply'
-  dependsOn: PlanTerraform
-  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne('${{ parameters.destroyInfrastructure }}', true))
+  dependsOn: Plan
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
   jobs:
   - deployment: TerraformApply
     displayName: 'Deploy Infrastructure'
@@ -232,231 +161,12 @@ stages:
               command: 'apply'
               workingDirectory: '$(workingDirectory)'
               environmentServiceNameAzureRM: '$(azureServiceConnection)'
-              commandOptions: 'tfplan'
+              commandOptions: '-auto-approve -var-file="terraform.tfvars"'
           
           - task: TerraformTaskV4@4
-            displayName: 'Get Terraform Outputs'
+            displayName: 'Terraform Output'
             inputs:
               provider: 'azurerm'
               command: 'output'
               workingDirectory: '$(workingDirectory)'
               environmentServiceNameAzureRM: '$(azureServiceConnection)'
-              commandOptions: '-json'
-            name: terraformOutputs
-          
-          - task: PowerShell@2
-            displayName: 'Set Pipeline Variables from Terraform Outputs'
-            inputs:
-              targetType: 'inline'
-              script: |
-                $outputs = Get-Content "$(workingDirectory)/terraform-outputs.json" | ConvertFrom-Json
-                
-                # Extract AKS cluster name and resource group
-                $aksClusterName = $outputs.aks_cluster_name.value
-                $resourceGroupName = $outputs.resource_group_name.value
-                
-                Write-Host "AKS Cluster Name: $aksClusterName"
-                Write-Host "Resource Group: $resourceGroupName"
-                
-                # Set pipeline variables for next stage
-                Write-Host "##vso[task.setvariable variable=aksClusterName;isOutput=true]$aksClusterName"
-                Write-Host "##vso[task.setvariable variable=resourceGroupName;isOutput=true]$resourceGroupName"
-            name: setOutputs
-
-# Terraform Destroy Stage (Manual only)
-- stage: DestroyTerraform
-  displayName: 'Terraform Destroy (DANGER)'
-  dependsOn: ValidateTerraform
-  condition: and(succeeded(), eq('${{ parameters.destroyInfrastructure }}', true), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
-  jobs:
-  - deployment: TerraformDestroy
-    displayName: 'Destroy Infrastructure'
-    environment: 'dev-infrastructure-destroy'
-    pool:
-      vmImage: 'ubuntu-latest'
-    
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-          - task: PowerShell@2
-            displayName: '⚠️ DANGER: Infrastructure Destruction Warning'
-            inputs:
-              targetType: 'inline'
-              script: |
-                Write-Host "⚠️ DANGER: About to DESTROY all infrastructure!" -ForegroundColor Red -BackgroundColor Yellow
-                Write-Host ""
-                Write-Host "This will DELETE:" -ForegroundColor Red
-                Write-Host "   • AKS Cluster and all workloads"
-                Write-Host "   • Virtual Networks and subnets"
-                Write-Host "   • Resource Groups"
-                Write-Host "   • All data and configurations"
-                Write-Host ""
-                Write-Host "🔥 THIS ACTION IS IRREVERSIBLE!" -ForegroundColor Red
-                Write-Host "Environment approval required for destruction" -ForegroundColor Yellow
-
-          - task: TerraformInstaller@0
-            displayName: 'Install Terraform'
-            inputs:
-              terraformVersion: '$(terraformVersion)'
-          
-          - task: TerraformTaskV4@4
-            displayName: 'Terraform Init'
-            inputs:
-              provider: 'azurerm'
-              command: 'init'
-              workingDirectory: '$(workingDirectory)'
-              backendServiceArm: '$(azureServiceConnection)'
-              backendAzureRmResourceGroupName: '$(terraformStateResourceGroup)'
-              backendAzureRmStorageAccountName: '$(terraformStateStorageAccount)'
-              backendAzureRmContainerName: 'tfstate'
-              backendAzureRmKey: 'dev.terraform.tfstate'
-          
-          - task: TerraformTaskV4@4
-            displayName: 'Terraform Destroy'
-            inputs:
-              provider: 'azurerm'
-              command: 'destroy'
-              workingDirectory: '$(workingDirectory)'
-              environmentServiceNameAzureRM: '$(azureServiceConnection)'
-              commandOptions: '-auto-approve -var-file="terraform.tfvars"'
-
-# Microservices Deployment Stage
-- stage: DeployMicroservices
-  displayName: 'Deploy Microservices'
-  dependsOn: 
-    - ApplyTerraform
-    - ValidateKubernetes
-  condition: and(succeeded(), eq('${{ parameters.deployMicroservices }}', true))
-  variables:
-    aksClusterName: $[ stageDependencies.ApplyTerraform.TerraformApply.outputs['deploy.setOutputs.aksClusterName'] ]
-    resourceGroupName: $[ stageDependencies.ApplyTerraform.TerraformApply.outputs['deploy.setOutputs.resourceGroupName'] ]
-  
-  jobs:
-  - deployment: DeployToAKS
-    displayName: 'Deploy Microservices to AKS'
-    environment: 'dev-microservices'
-    pool:
-      vmImage: 'ubuntu-latest'
-    
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-          - task: AzureCLI@2
-            displayName: 'Connect to AKS Cluster'
-            inputs:
-              azureSubscription: '$(azureServiceConnection)'
-              scriptType: 'bash'
-              scriptLocation: 'inlineScript'
-              inlineScript: |
-                echo "Connecting to AKS cluster: $(aksClusterName) in resource group: $(resourceGroupName)"
-                az aks get-credentials --resource-group "$(resourceGroupName)" --name "$(aksClusterName)" --overwrite-existing
-          
-          - task: KubectlInstaller@0
-            displayName: 'Install kubectl'
-            inputs:
-              kubectlVersion: 'v1.28.0'
-          
-          - task: Kubernetes@1
-            displayName: 'Verify Cluster Connectivity'
-            inputs:
-              connectionType: 'None'
-              command: 'cluster-info'
-          
-          - task: Kubernetes@1
-            displayName: 'Deploy Namespaces'
-            inputs:
-              connectionType: 'None'
-              command: 'apply'
-              arguments: '-f $(kubernetesDirectory)/namespaces/ecommerce-namespace.yaml'
-          
-          - script: |
-              kubectl wait --for=condition=Active namespace/ecommerce --timeout=60s
-              kubectl wait --for=condition=Active namespace/ecommerce-database --timeout=60s
-              kubectl wait --for=condition=Active namespace/monitoring --timeout=60s
-            displayName: 'Wait for Namespaces'
-          
-          - task: Kubernetes@1
-            displayName: 'Deploy Database'
-            inputs:
-              connectionType: 'None'
-              command: 'apply'
-              arguments: '-f $(kubernetesDirectory)/database/postgres-deployment.yaml'
-          
-          - script: |
-              kubectl wait --for=condition=available --timeout=300s deployment/postgres -n ecommerce-database
-            displayName: 'Wait for Database Ready'
-          
-          - task: Kubernetes@1
-            displayName: 'Deploy Backend Services'
-            inputs:
-              connectionType: 'None'
-              command: 'apply'
-              arguments: '-f $(kubernetesDirectory)/backend/backend-services.yaml'
-          
-          - script: |
-              kubectl wait --for=condition=available --timeout=300s deployment/user-service -n ecommerce
-              kubectl wait --for=condition=available --timeout=300s deployment/product-service -n ecommerce
-            displayName: 'Wait for Backend Services Ready'
-          
-          - task: Kubernetes@1
-            displayName: 'Deploy Frontend'
-            inputs:
-              connectionType: 'None'
-              command: 'apply'
-              arguments: '-f $(kubernetesDirectory)/frontend/frontend-deployment.yaml'
-          
-          - script: |
-              kubectl wait --for=condition=available --timeout=300s deployment/frontend -n ecommerce
-            displayName: 'Wait for Frontend Ready'
-          
-          - task: Kubernetes@1
-            displayName: 'Deploy Ingress'
-            inputs:
-              connectionType: 'None'
-              command: 'apply'
-              arguments: '-f $(kubernetesDirectory)/ingress/ingress-config.yaml'
-          
-          - task: Kubernetes@1
-            displayName: 'Deploy Monitoring Stack'
-            inputs:
-              connectionType: 'None'
-              command: 'apply'
-              arguments: '-f $(kubernetesDirectory)/monitoring/monitoring-stack.yaml'
-          
-          - script: |
-              kubectl wait --for=condition=available --timeout=300s deployment/prometheus -n monitoring
-              kubectl wait --for=condition=available --timeout=300s deployment/grafana -n monitoring
-            displayName: 'Wait for Monitoring Stack Ready'
-          
-          - task: PowerShell@2
-            displayName: '🎉 Deployment Summary'
-            inputs:
-              targetType: 'inline'
-              script: |
-                Write-Host "=================================="
-                Write-Host "🎉 MICROSERVICES DEPLOYMENT COMPLETE" -ForegroundColor Green
-                Write-Host "=================================="
-                Write-Host ""
-                
-                Write-Host "📊 PODS STATUS:" -ForegroundColor Cyan
-                kubectl get pods -n ecommerce -o wide
-                Write-Host ""
-                kubectl get pods -n ecommerce-database -o wide
-                Write-Host ""
-                kubectl get pods -n monitoring -o wide
-                Write-Host ""
-                
-                Write-Host "🌐 SERVICES:" -ForegroundColor Cyan
-                kubectl get svc --all-namespaces
-                Write-Host ""
-                
-                Write-Host "🔀 INGRESS:" -ForegroundColor Cyan
-                kubectl get ingress -n ecommerce
-                Write-Host ""
-                
-                Write-Host "📈 ACCESS INFORMATION:" -ForegroundColor Yellow
-                Write-Host "Check LoadBalancer IPs with:"
-                Write-Host "kubectl get svc ecommerce-loadbalancer -n ecommerce"
-                Write-Host "kubectl get svc grafana-service -n monitoring"

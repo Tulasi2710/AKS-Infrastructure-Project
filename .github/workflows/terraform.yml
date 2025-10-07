@@ -44,37 +44,23 @@ jobs:
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-    - name: Terraform Format
-      env:
-        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-        ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        ARM_USE_OIDC: true
-      run: terraform fmt -recursive
-      working-directory: ./terraform
-
     - name: Terraform Init
+      working-directory: ${{ env.WORKING_DIR }}
       env:
         ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         ARM_USE_OIDC: true
-      run: |
-        terraform init \
-          -backend-config="resource_group_name=${{ secrets.TF_STATE_RESOURCE_GROUP }}" \
-          -backend-config="storage_account_name=${{ secrets.TF_STATE_STORAGE_ACCOUNT }}" \
-          -backend-config="container_name=tfstate" \
-          -backend-config="key=dev.terraform.tfstate"
-      working-directory: ${{ env.WORKING_DIR }}
+      run: terraform init
 
     - name: Terraform Validate
+      working-directory: ${{ env.WORKING_DIR }}
       env:
         ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         ARM_USE_OIDC: true
       run: terraform validate
-      working-directory: ${{ env.WORKING_DIR }}
 
   terraform-plan:
     name: 'Terraform Plan'
