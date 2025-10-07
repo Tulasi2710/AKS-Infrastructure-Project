@@ -121,6 +121,24 @@ stages:
       runOnce:
         deploy:
           steps:
+          - task: PowerShell@2
+            displayName: '🚨 Pre-Deployment Approval Notice'
+            inputs:
+              targetType: 'inline'
+              script: |
+                Write-Host "🚨 CRITICAL: About to deploy AKS Infrastructure!" -ForegroundColor Red
+                Write-Host ""
+                Write-Host "📋 Resources to be deployed:" -ForegroundColor Yellow
+                Write-Host "   • Resource Group: aks-infra-dev-rg-*"
+                Write-Host "   • Virtual Network: 10.0.0.0/16"
+                Write-Host "   • AKS Cluster: 2 nodes (Standard_D2s_v6)"
+                Write-Host "   • Network Security Groups"
+                Write-Host ""
+                Write-Host "💰 Estimated Cost: ~$150-200 USD/month" -ForegroundColor Cyan
+                Write-Host "🔒 Environment approval required" -ForegroundColor Green
+                Write-Host ""
+                Write-Host "⏳ Proceeding with approved deployment..." -ForegroundColor Green
+
           - task: TerraformInstaller@0
             displayName: 'Install Terraform'
             inputs:
