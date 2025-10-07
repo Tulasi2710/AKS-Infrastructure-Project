@@ -186,9 +186,13 @@ stages:
               inlineScript: |
                 terraform apply -auto-approve tfplan
           
-          - task: TerraformTaskV4@4
+          - task: AzureCLI@2
             displayName: 'Terraform Output'
             inputs:
-              provider: 'azurerm'
-              command: 'output'
+              azureSubscription: 'azure-service-connection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
               workingDirectory: $(workingDirectory)
+              inlineScript: |
+                echo "=== Terraform Outputs ==="
+                terraform output
