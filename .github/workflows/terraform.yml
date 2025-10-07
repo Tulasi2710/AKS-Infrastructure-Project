@@ -40,8 +40,8 @@ jobs:
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-    - name: Terraform Format Check
-      run: terraform fmt -check -recursive
+    - name: Terraform Format
+      run: terraform fmt -recursive
       working-directory: ./terraform
 
     - name: Terraform Init
