@@ -25,6 +25,9 @@ terraform {
 
 # Configure the Microsoft Azure Provider
 provider "azurerm" {
+  # Use workload identity federation for GitHub Actions
+  use_oidc = true
+  
   features {
     resource_group {
       prevent_deletion_if_contains_resources = false
