@@ -530,7 +530,7 @@ jobs:
     name: 'Sync GitOps Applications'
     runs-on: ubuntu-latest
     needs: gitops-deployment
-    if: github.ref == 'refs/heads/main' && (contains(github.event.head_commit.modified, 'k8s/') || github.event_name == 'workflow_dispatch')
+    if: github.ref == 'refs/heads/main' && github.event.inputs.action != 'uninstall' && github.event.inputs.action != 'status'
     
     steps:
     - name: Checkout
@@ -583,11 +583,26 @@ jobs:
           exit 1
         fi
         
+        # Create ArgoCD applications if they don't exist
+        echo "📋 Ensuring ArgoCD applications are created..."
+        if [ -f "argocd/project.yaml" ]; then
+          kubectl apply -f argocd/project.yaml || echo "Project creation failed or already exists"
+        fi
+        
+        if [ -f "argocd/applications.yaml" ]; then
+          kubectl apply -f argocd/applications.yaml || echo "Applications creation failed or already exist"
+        fi
+        
+        # Wait a moment for applications to be created
+        sleep 10
+        
         # Get list of applications
         APPLICATIONS=$(kubectl get applications -n argocd -o name 2>/dev/null | sed 's/application.argoproj.io\///')
         
         if [ -z "$APPLICATIONS" ]; then
-          echo "⚠️ No ArgoCD applications found"
+          echo "⚠️ No ArgoCD applications found after creation attempt"
+          echo "Checking if application files exist..."
+          ls -la argocd/ || echo "ArgoCD directory not found"
           exit 0
         fi
         
